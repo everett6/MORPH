@@ -11,19 +11,30 @@ def train_run(cfg, tokens, steps, seed=42, lr=1e-3, checkpoint=None, resume=None
               device='cpu', dtype=torch.float32, activation_checkpointing=False,
               batch_size=1, sequence_length=None, accumulation=1, engine='resident',
               optimizer_name='hybrid', muon_lr=None, checkpoint_every=0, progress=None):
+    if cfg.proof_enabled:
+        raise ValueError('proof-enabled models require structured proof training')
     if steps < 0 or batch_size < 1 or accumulation < 1 or lr <= 0 or checkpoint_every < 0:
         raise ValueError('invalid training schedule')
-    tokens = tokens.detach().cpu().long()
-    if tokens.ndim != 2 or tokens.numel() == 0 or tokens.shape[1] < 2:
-        raise ValueError('tokens must have shape [examples, sequence >= 2]')
-    if tokens.min() < 0 or tokens.max() >= cfg.vocab_size:
-        raise ValueError('token IDs exceed configured vocabulary')
-    length = tokens.shape[1] if sequence_length is None else sequence_length + 1
-    if length < 2 or length > tokens.shape[1]:
-        raise ValueError('sequence length exceeds available data')
-    fingerprint = hashlib.sha256(tokens.numpy().tobytes()).hexdigest()
+    mapped = hasattr(tokens, 'sample') and hasattr(tokens, 'manifest')
+    if mapped:
+        if cfg.vocab_size < 256 or sequence_length is None:
+            raise ValueError('mapped byte shards need vocabulary256 and sequence_length')
+        length = sequence_length+1
+        fingerprint = hashlib.sha256(__import__('json').dumps(tokens.manifest,sort_keys=True).encode()).hexdigest()
+        token_shape = ('mapped',len(tokens.records))
+    else:
+        tokens = tokens.detach().cpu().long()
+        if tokens.ndim != 2 or tokens.numel() == 0 or tokens.shape[1] < 2:
+            raise ValueError('tokens must have shape [examples, sequence >= 2]')
+        if tokens.min() < 0 or tokens.max() >= cfg.vocab_size:
+            raise ValueError('token IDs exceed configured vocabulary')
+        length = tokens.shape[1] if sequence_length is None else sequence_length + 1
+        if length < 2 or length > tokens.shape[1]:
+            raise ValueError('sequence length exceeds available data')
+        fingerprint = hashlib.sha256(tokens.numpy().tobytes()).hexdigest()
+        token_shape = tuple(tokens.shape)
     settings = dict(lr=lr, batch_size=batch_size, length=length, accumulation=accumulation,
-                    dtype=str(dtype), device_type=torch.device(device).type, engine=engine, optimizer=optimizer_name, muon_lr=muon_lr, fingerprint=fingerprint, token_shape=tuple(tokens.shape))
+                    dtype=str(dtype), device_type=torch.device(device).type, engine=engine, optimizer=optimizer_name, muon_lr=muon_lr, fingerprint=fingerprint, token_shape=token_shape)
     torch.manual_seed(seed)
     if engine not in ('resident', 'dls', 'async') or optimizer_name not in ('hybrid', 'adamw'):
         raise ValueError('unsupported engine or optimizer')
@@ -37,7 +48,8 @@ def train_run(cfg, tokens, steps, seed=42, lr=1e-3, checkpoint=None, resume=None
     losses = []
     if resume:
         saved = torch.load(resume, map_location='cpu', weights_only=True)
-        if saved['config'] != cfg.to_dict() or saved['settings'] != settings:
+        from morph import MorphConfig
+        if MorphConfig(**saved['config']).to_dict() != cfg.to_dict() or saved['settings'] != settings:
             raise ValueError('resume configuration, data, or training settings differ')
         model.load_state_dict(saved['model'])
         optimizer.load_state_dict(saved['optimizer'])
@@ -69,9 +81,12 @@ def train_run(cfg, tokens, steps, seed=42, lr=1e-3, checkpoint=None, resume=None
         optimizer.zero_grad(set_to_none=True)
         total = 0.0
         for _ in range(accumulation):
-            rows = torch.randint(tokens.shape[0], (batch_size,))
-            starts = torch.randint(tokens.shape[1] - length + 1, (batch_size,))
-            batch = torch.stack([tokens[r, s:s + length] for r, s in zip(rows, starts)]).to(device)
+            if mapped:
+                batch = tokens.sample(torch.default_generator,batch_size,length).to(device)
+            else:
+                rows = torch.randint(tokens.shape[0], (batch_size,))
+                starts = torch.randint(tokens.shape[1] - length + 1, (batch_size,))
+                batch = torch.stack([tokens[r, s:s + length] for r, s in zip(rows, starts)]).to(device)
             if streaming is not None:
                 loss_value = streaming.backward(batch, 1 / accumulation)
             else:

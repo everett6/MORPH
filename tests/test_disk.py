@@ -59,8 +59,12 @@ def test_disk_clean_resume_and_failure_semantics(tmp_path):
     a.update = fail_after_one
     with pytest.raises(OSError):
         trainer.step([ids])
-    with pytest.raises(RuntimeError, match='incomplete'):
-        DiskState.open(root, template)
+    recovered=DiskState.open(root,template)
+    DiskDLS(template,recovered).resume_step()
+    DiskDLS(template,b).step([ids])
+    for name in b.entries:
+        torch.testing.assert_close(recovered.weight(name),b.weight(name),rtol=0,atol=0)
+    assert recovered.manifest['step']==b.manifest['step']==4
     assert not b.manifest['dirty']
 
 
@@ -72,3 +76,28 @@ def test_disk_bf16_cuda_smoke(tmp_path):
     ids = torch.tensor([[1, 2, 3, 1, 2, 3]])
     result = disk_train(cfg, ids, tmp_path / 'bf16', 2, device='cuda', dtype=torch.bfloat16, accumulation=2, sequence_length=3)
     assert result['step'] == 2 and result['final']['loss'] > 0
+
+
+@pytest.mark.parametrize('point',['journal_durable','partial_state_write','cursor_file_durable','cursor_manifest_durable','before_final_manifest','final_manifest_durable'])
+def test_transaction_fault_boundaries_resume_exactly(tmp_path,point):
+    cfg=MorphConfig(vocab_size=8,d_model=8,num_layers=1,d_ff=16,d_state=2,head_dim=4)
+    original=MorphModel(cfg)
+    with torch.device('meta'):template=MorphModel(cfg)
+    a=DiskState.create(tmp_path/'interrupted',template,source=original)
+    b=DiskState.create(tmp_path/'expected',template,source=original)
+    batches=[torch.tensor([[1,2,3,4]]),torch.tensor([[2,3,4,5]])]
+    DiskDLS(template,b).step(batches)
+    def inject(actual):
+        if actual==point:raise OSError('injected '+point)
+    a.fault=inject
+    with pytest.raises(OSError):DiskDLS(template,a).step(batches)
+    reopened=DiskState.open(a.root,template)
+    if reopened.manifest.get('transaction'):DiskDLS(template,reopened).resume_step()
+    assert reopened.manifest['step']==1 and not reopened.manifest['dirty']
+    for name in b.entries:
+        torch.testing.assert_close(reopened.weight(name),b.weight(name),rtol=0,atol=0)
+        assert (reopened.root/reopened.entries[name]['file']).read_bytes()==(b.root/b.entries[name]['file']).read_bytes()
+    DiskDLS(template,reopened).step(batches)
+    DiskDLS(template,b).step(batches)
+    for name in b.entries:
+        assert (reopened.root/reopened.entries[name]['file']).read_bytes()==(b.root/b.entries[name]['file']).read_bytes()

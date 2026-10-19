@@ -57,6 +57,7 @@ class MorphBlock(nn.Module):
 class MorphOutput:
     logits: torch.Tensor
     states: tuple[torch.Tensor, ...]
+    hidden: torch.Tensor | None = None
 
 
 class MorphModel(nn.Module):
@@ -69,6 +70,9 @@ class MorphModel(nn.Module):
         self.norm = RMSNorm(cfg.d_model, cfg.norm_eps)
         self.lm_head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
         self.lm_head.weight = self.embedding.weight
+        if cfg.proof_enabled:
+            from .reasoning_core import ReasoningCore
+            self.reasoning = ReasoningCore(cfg)
         self.apply(self._initialize)
 
     @staticmethod
@@ -91,10 +95,22 @@ class MorphModel(nn.Module):
             else:
                 x, state, graph_memory = block(x, state, graph_memory, True)
             result.append(state)
-        return MorphOutput(self.lm_head(self.norm(x)), tuple(result))
+        hidden = self.norm(x)
+        return MorphOutput(self.lm_head(hidden), tuple(result), hidden)
 
     def loss(self, tokens):
         if tokens.shape[1] < 2:
             raise ValueError('training requires at least two tokens')
         logits = self(tokens[:, :-1]).logits
         return F.cross_entropy(logits.float().reshape(-1, self.config.vocab_size), tokens[:, 1:].reshape(-1))
+
+
+    def forward_proof(self, input_ids, graph):
+        if not self.config.proof_enabled:
+            raise ValueError('proof_enabled configuration is required')
+        output = self(input_ids)
+        embeddings = self.embedding(graph['tokens'])
+        mask = graph['token_mask'][..., None]
+        nodes = (embeddings*mask).sum(-2)/mask.sum(-2).clamp_min(1)
+        heads = self.reasoning(output.hidden, nodes, graph)
+        return dict(logits=output.logits, **heads)

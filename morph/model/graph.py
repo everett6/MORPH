@@ -31,6 +31,7 @@ class GraphExchange(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.steps = cfg.reasoning_steps
+        self.update_enabled=cfg.graph_update
         self.capacity = cfg.graph_nodes
         self.width = cfg.d_graph
         self.seed = nn.Parameter(torch.randn(cfg.graph_nodes, cfg.d_graph) * .02)
@@ -55,7 +56,7 @@ class GraphExchange(nn.Module):
         for t, token in enumerate(x.unbind(1)):
             query = self.query(token)
             prior = 0 if memory is None else memory[:, t]
-            for _ in range(self.steps):
+            for _ in range(self.steps if self.update_enabled else 0):
                 message = aggregate_hyperedges(state, sources, targets, mask,
                                                self.relation[None].expand(batch, self.capacity, -1))
                 combined = torch.cat((state, message + query[:, None] + prior), -1)

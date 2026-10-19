@@ -20,3 +20,9 @@ venv/
 disk-state/
 datasets/
 runs/
+
+# Generated token shards and managed disk transaction artifacts
+*.npy
+journal/
+cursor-*.pt
+transaction-input.pt

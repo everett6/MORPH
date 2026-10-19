@@ -1,0 +1,45 @@
+{
+  "parameters": 102402048,
+  "config": {
+    "vocab_size": 256,
+    "d_model": 512,
+    "num_layers": 32,
+    "d_ff": 1024,
+    "expand": 2,
+    "d_state": 16,
+    "head_dim": 64,
+    "ssm_backend": "parallel",
+    "scan_chunk_size": 16,
+    "proof_enabled": false,
+    "graph_enabled": false,
+    "graph_update": true,
+    "graph_interval": 4,
+    "d_graph": 128,
+    "graph_nodes": 16,
+    "reasoning_steps": 4,
+    "norm_eps": 1e-06
+  },
+  "device": "cpu",
+  "engine": "resident",
+  "ablation": "ssm",
+  "measured": true,
+  "verified_proof_success": null,
+  "component": "ssm",
+  "component_parameters": 1622064,
+  "metrics": {
+    "elapsed_seconds": 0.04216022200125735,
+    "tokens_per_second": 4554.055716174216
+  },
+  "metadata": {
+    "steps": 3,
+    "sequence_length": 64,
+    "batch_size": 1,
+    "accumulation": 1,
+    "precision": "fp32",
+    "seed": null,
+    "threads": 2,
+    "torch_version": "2.14.0+cu130",
+    "cpu_model": "AMD Ryzen 9 7950X 16-Core Processor",
+    "annotation": "Recorded invocation settings added after execution; component RNG seed was not recorded."
+  }
+}

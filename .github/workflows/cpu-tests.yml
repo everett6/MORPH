@@ -1,0 +1,19 @@
+name: CPU correctness
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  correctness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install numpy pytest
+      - run: python -m pytest -q
+      - run: python train.py --proof-traces docs/proof_examples.jsonl --steps 2 --checkpoint /tmp/proof.pt
+      - run: python evaluate.py --checkpoint /tmp/proof.pt --proof-traces docs/proof_examples.jsonl
