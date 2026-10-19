@@ -61,6 +61,8 @@ class Slot:
 
 class StreamTrainEngine:
     def __init__(self, model, device='cpu', async_mode=False, dtype=torch.float32):
+        if model.config.proof_enabled:
+            raise ValueError('shared proof reasoning core is not registered for streaming; use resident structured training')
         if any(p.device.type != 'cpu' for p in model.parameters()):
             raise ValueError('streaming requires CPU master parameters')
         self.model, self.device, self.dtype = model, torch.device(device), dtype

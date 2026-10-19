@@ -13,7 +13,7 @@ dependencies = ["torch>=2.4", "numpy"]
 test = ["pytest>=8"]
 
 [tool.setuptools.packages.find]
-include = ["morph*", "streamtrain*"]
+include = ["morph*", "streamtrain*", "data*", "verifier*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

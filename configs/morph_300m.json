@@ -1,0 +1,12 @@
+{
+  "vocab_size": 256,
+  "d_model": 768,
+  "num_layers": 42,
+  "d_ff": 1536,
+  "expand": 2,
+  "d_state": 16,
+  "head_dim": 64,
+  "ssm_backend": "parallel",
+  "scan_chunk_size": 16,
+  "graph_enabled": false
+}

@@ -1,0 +1,55 @@
+{
+  "parameters": 102402048,
+  "config": {
+    "vocab_size": 256,
+    "d_model": 512,
+    "num_layers": 32,
+    "d_ff": 1024,
+    "expand": 2,
+    "d_state": 16,
+    "head_dim": 64,
+    "ssm_backend": "parallel",
+    "scan_chunk_size": 16,
+    "proof_enabled": false,
+    "graph_enabled": false,
+    "graph_update": true,
+    "graph_interval": 4,
+    "d_graph": 128,
+    "graph_nodes": 16,
+    "reasoning_steps": 4,
+    "norm_eps": 1e-06
+  },
+  "device": "cpu",
+  "engine": "disk",
+  "ablation": "ssm",
+  "measured": true,
+  "verified_proof_success": null,
+  "metrics": {
+    "step": 1,
+    "final": {
+      "loss": 5.623319625854492,
+      "grad_norm": 150.2897680372086
+    },
+    "state_dir": "/tmp/morph-scaling-mzla1tai/state",
+    "elapsed_seconds": 2.4244394279958215,
+    "tokens_per_second": 3.2997318504316073,
+    "peak_rss_bytes": 1063301120,
+    "peak_cuda_allocated_bytes": 0,
+    "transfer_bytes": {
+      "h2d_weights": 1229871104,
+      "d2h_gradients": 820264960
+    }
+  },
+  "metadata": {
+    "steps": 1,
+    "sequence_length": 8,
+    "batch_size": 1,
+    "accumulation": 1,
+    "precision": "fp32",
+    "seed": 42,
+    "threads": 2,
+    "torch_version": "2.14.0+cu130",
+    "cpu_model": "AMD Ryzen 9 7950X 16-Core Processor",
+    "annotation": "Recorded invocation settings added after execution."
+  }
+}

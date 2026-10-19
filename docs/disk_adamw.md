@@ -8,7 +8,7 @@ For 6,995,110,080 parameters, canonical FP32 weights and both FP32 moments take
 **83,941,320,960 bytes (78.18 GiB)** of disk. There is no full-model gradient
 file, no full-model CPU tensor allocation, and no duplicate full checkpoint.
 The initial files are physically allocated. Current development disk has about
-102 GiB free; the CLI also reserves 2 GiB. Leave additional space for your
+102 GiB free; the CLI also reserves bounded transaction state and 2 GiB headroom. Leave additional space for your
 corpus, other applications, and any independently retained backup.
 
 ## Why two backward passes
@@ -80,19 +80,28 @@ python train.py --config configs/morph_7b.json --engine disk --optimizer adamw \
 ```
 
 No full 7B allocation or training run has been performed. Use a local shard
-that fits in remaining RAM: text/JSON ingestion currently materializes the
-input corpus. This is full-parameter training, not adapters or frozen layers.
+that fits in remaining RAM for text/JSON, or compile a memory-mapped shard
+with `python -m data.prepare` and pass `--shard` instead of `--tokens`. This is full-parameter training, not adapters or frozen layers.
 
 ## Durability and cost
 
-Initialization and each update mark the manifest dirty before mutation. All
-parameter-state writes are flushed/fsynced before the clean completed-step
-manifest is atomically replaced and its directory synced. A process stopped
-during forward or the first norm pass leaves the last clean state intact.
-A process/disk failure during the update pass leaves a **dirty store that is
-rejected on reopen**. This version cannot roll back or resume a partially
-updated step. Keep an external backup if that recovery guarantee is required;
-a full backup needs another 78.18 GiB, beyond current free space.
+Initialization failures still fail closed. Training updates now use a durable
+stage transaction: original forward boundaries, norm/clipping multiplier,
+microbatches, cotangents, tied-head gradient and stage cursor are saved. Before
+mutating a stage, its old FP32 weight/m/v files are copied into a bounded undo
+journal and fsynced. A durable cursor commit either retains the complete new
+stage or restores the journal and recomputes that uncommitted stage on restart.
+Remaining reverse stages resume from the saved original boundaries/cotangents.
+Six injected failure boundaries recover byte-identical weights and both Adam
+moments, including a subsequent optimizer update. No whole-model duplicate is
+required. `--resume-store` resumes recoverable in-progress transactions; legacy
+dirty stores without transaction state remain rejected.
+
+The disk guard now reserves the largest stage's 12-byte/parameter undo state,
+three replay-boundary windows, two tied-gradient windows, and 2 GiB headroom in
+addition to canonical state. These files add IO beyond the original two-pass
+numbers below. See [audit implementation](audit_implementation.md) for the
+recovery protocol and its tested limits.
 
 The extra backward pass and disk IO reduce throughput. For K1, the 7B step
 logically reads/writes roughly **254 GB** of weights/moments plus activation

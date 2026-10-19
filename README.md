@@ -19,7 +19,7 @@ and Adam moments to disk and holds only stage windows in RAM. The 7B state
 requires 78.18 GiB disk; B1/T32/K1 BF16 has a conservative ~9.98 GiB host and
 ~5.57 GiB CUDA estimate. No full 7B run has been performed. It preserves
 AdamW updates in small comparisons, at the cost of extra replay and disk IO.
-See that guide for commands, guards, and the dirty-step recovery limitation.
+See that guide for commands, guards, and the bounded transaction recovery protocol.
 
 ## Run now
 
@@ -122,26 +122,23 @@ nonfinite optimizer rejection, and exact checkpoint/resume with accumulation.
 
 ## Architectural scope and roadmap
 
-The SSM is an explicit zero-order-hold diagonal headwise PyTorch reference with
-input-dependent dt/B/C and negative A. It is **not** an optimized Mamba-2 kernel
-or parameter-compatible Mamba checkpoint implementation; causal convolution is
-not implemented. No custom CUDA kernel is claimed.
+The SSM now defaults to a bounded chunk-parallel affine scan with a scalar
+reference and forward/backward equivalence checks. It is not a fused Mamba-2
+kernel or compatible pretrained checkpoint implementation; causal convolution
+is not implemented.
 
-Graph exchange uses a fixed directed ring with learned relation features,
-gated updates, attention readout, and four refinements with shared weights.
-Token-aligned graph trajectories carry continuous memory between exchange
-blocks without leaking future tokens into next-token predictions. All graph
-nodes are active. The general masked hyperedge aggregator is separately tested.
-This is a causal neural graph prototype, not the brief's complete symbolic
-proof hypergraph. Independent node types/statuses, external topology/action
-traces, a separate post-backbone controller/reasoning core, graph/action/value
-losses, learned stopping, and Lean verification are still future work.
+The causal language-model baseline retains neural ring memory. Opt-in
+`proof_enabled` adds typed symbolic graph inputs, external deterministic graph
+actions/replay, a separate shared post-backbone reasoning core, action-conditioned
+node selection, dependency/value heads, and joint teacher-forced losses.
+Structured proof training currently requires resident FP32 execution; streaming
+rejects that mode rather than omit its parameters.
 
-Current foundation: trainable backbone, causal neural graph refinement,
-resident and exact streamed training, CUDA ping-pong, hybrid optimizer and
-resumption. Next: typed symbolic graph integration and proof supervision;
-optimized tested SSM operation; intermediate-size memory/throughput profiles;
-then resource-qualified 7B training and verified theorem evaluation.
+[The audit implementation guide](docs/audit_implementation.md) contains commands,
+actual 100M CPU timing evidence, typed proof/data/Lean interfaces, transactional
+disk recovery, and remaining empirical gates. Real Lean integration is skipped
+when Lean is absent. No verified proof success, architectural superiority, or
+validated full 7B/15B training throughput is claimed.
 
 Muon follows the algorithm in the author's [primary implementation](https://github.com/KellerJordan/Muon/blob/master/muon.py),
 using FP32 Newton-Schulz iterations as a reproducible CPU baseline instead of

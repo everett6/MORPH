@@ -1,11 +1,13 @@
 """Bounded-memory two-pass disk AdamW. No optimizer approximation.
 
 Canonical FP32 weight/m/v files; gradients exist for one stage at a time.
-Incomplete updates fail closed. Completed steps are durable resume points.
+Recoverable stage transactions retain one undo window and a durable replay
+cursor; legacy dirty stores without transaction state fail closed.
 """
 import json
 import math
 import os
+import shutil
 from contextlib import nullcontext
 from pathlib import Path
 import numpy as np
@@ -27,6 +29,16 @@ def durable_json(path, data):
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+
+
+def durable_torch(path, value):
+    temp=path.with_suffix('.tmp')
+    with temp.open('wb') as handle:
+        torch.save(value,handle);handle.flush();os.fsync(handle.fileno())
+    os.replace(temp,path)
+    descriptor=os.open(path.parent,os.O_RDONLY)
+    try:os.fsync(descriptor)
+    finally:os.close(descriptor)
 
 
 class DiskState:
@@ -78,11 +90,70 @@ class DiskState:
     def open(cls, root, model):
         root = Path(root)
         manifest = json.loads((root / 'manifest.json').read_text())
-        if manifest['dirty']:
+        if manifest['dirty'] and not manifest.get('transaction'):
             raise RuntimeError('incomplete disk update: state is not a valid resume point; restore a backup')
-        if manifest['config'] != model.config.to_dict():
+        from morph import MorphConfig
+        if MorphConfig(**manifest['config']).to_dict() != model.config.to_dict():
             raise ValueError('disk model config differs')
+        if not manifest['dirty']:
+            for path in root.glob('cursor-*.pt'):path.unlink(missing_ok=True)
+            (root/'transaction-input.pt').unlink(missing_ok=True)
+            shutil.rmtree(root/'journal',ignore_errors=True)
         return cls(root, model, manifest)
+
+    def fault(self,point):
+        """Fault-injection hook; production default has no side effects."""
+        return None
+
+    def recover_stage(self):
+        transaction=self.manifest.get('transaction')
+        if not transaction:
+            return
+        journal=self.root/'journal'
+        if transaction.get('journal') is not None:
+            # A committed cursor always clears journal atomically. If journal is
+            # present, this stage did not commit and its complete old state wins.
+            for path in journal.glob('*.bin'):
+                shutil.copyfile(path,self.root/path.name)
+                descriptor=os.open(self.root/path.name,os.O_RDWR)
+                try:os.fsync(descriptor)
+                finally:os.close(descriptor)
+            transaction['journal']=None
+            durable_json(self.root/'manifest.json',self.manifest)
+        if journal.exists():
+            shutil.rmtree(journal)
+        for path in self.root.glob('cursor-*.pt'):
+            if path.name!=transaction['cursor']:path.unlink()
+
+    def prepare_stage(self,index,names):
+        journal=self.root/'journal'
+        if journal.exists():shutil.rmtree(journal)
+        journal.mkdir()
+        for name in names:
+            file=self.entries[name]['file']
+            shutil.copyfile(self.root/file,journal/file)
+            descriptor=os.open(journal/file,os.O_RDWR)
+            try:os.fsync(descriptor)
+            finally:os.close(descriptor)
+        descriptor=os.open(journal,os.O_RDONLY)
+        try:os.fsync(descriptor)
+        finally:os.close(descriptor)
+        self.fault('journal_durable')
+        self.manifest['transaction']['journal']=index
+        durable_json(self.root/'manifest.json',self.manifest)
+
+    def commit_stage(self,index,cotangents,tied):
+        previous=self.manifest['transaction']['cursor']
+        filename=f'cursor-{index}.pt'
+        durable_torch(self.root/filename,dict(cotangents=[None if values is None else [v.detach().cpu() for v in values] for values in cotangents],
+                                             tied=None if tied is None else tied.detach().cpu()))
+        self.fault('cursor_file_durable')
+        transaction=self.manifest['transaction']
+        transaction.update(cursor=filename,next_stage=index-1,journal=None)
+        durable_json(self.root/'manifest.json',self.manifest)
+        self.fault('cursor_manifest_durable')
+        shutil.rmtree(self.root/'journal')
+        if previous!=filename:(self.root/previous).unlink(missing_ok=True)
 
     def read_into(self, name, destination):
         entry = self.entries[name]
@@ -116,6 +187,7 @@ class DiskState:
             denominator = second.sqrt().div_(math.sqrt(1 - .999**step)).add_(1e-8)
             weight.mul_(1-lr*.01).addcdiv_(first, denominator, value=-lr/(1-.9**step))
             mapped[:, start:end] = np.stack((weight.numpy(), first.numpy(), second.numpy()))
+            self.fault('partial_state_write')
         mapped.flush()
         del mapped
         descriptor = os.open(path, os.O_RDWR)
@@ -125,15 +197,23 @@ class DiskState:
             os.close(descriptor)
 
     def finish_step(self):
+        self.fault('before_final_manifest')
         self.manifest['step'] += 1
         self.manifest['dirty'] = False
+        transaction=self.manifest.pop('transaction',None)
         durable_json(self.root / 'manifest.json', self.manifest)
+        self.fault('final_manifest_durable')
+        if transaction:
+            (self.root/transaction['cursor']).unlink(missing_ok=True)
+            (self.root/'transaction-input.pt').unlink(missing_ok=True)
 
 
 class DiskDLS(StreamTrainEngine):
     def __init__(self, model, store, device='cpu', dtype=torch.float32, lr=.001, async_mode=False):
         # Parent requires CPU parameters; meta definitions allocate no canonical model.
         # Build parent with a temporary metadata-only override of that check.
+        if model.config.proof_enabled:
+            raise ValueError('shared proof core is not registered for disk streaming')
         self.store, self.lr = store, lr
         self.model, self.device, self.dtype = model, torch.device(device), dtype
         self.async_mode = async_mode
@@ -204,14 +284,23 @@ class DiskDLS(StreamTrainEngine):
             checkpoints.append(saved)
         return checkpoints
 
-    def reverse(self, batches, checkpoints, update=False, clip=1.):
+    def reverse(self, batches, checkpoints, update=False, clip=1.,initial_cursor=False):
         cotangents = [None] * len(batches)
         tied = None
+        start_stage=len(self.stages)-1
+        if update and self.store.manifest.get('transaction') and not initial_cursor:
+            self.store.recover_stage()
+            transaction=self.store.manifest['transaction']
+            cursor=torch.load(self.store.root/transaction['cursor'],weights_only=True,map_location='cpu')
+            cotangents=[None if values is None else [v.to(self.device) for v in values] for values in cursor['cotangents']]
+            tied=cursor['tied']
+            start_stage=transaction['next_stage']
         norm_squared, total_loss = 0., 0.
         embedding_name = self.canonical[id(self.model.embedding.weight)]
         step = self.store.manifest['step'] + 1
-        self.load(len(self.stages)-1, self.slots[(len(self.stages)-1) % 2])
-        for index in reversed(range(len(self.stages))):
+        if start_stage<0:return 0.,0.
+        self.load(start_stage, self.slots[start_stage % 2])
+        for index in reversed(range(start_stage+1)):
             slot = self.slots[index % 2]
             if index:
                 self.load(index-1, self.slots[(index-1) % 2])
@@ -238,6 +327,10 @@ class DiskDLS(StreamTrainEngine):
                     destination.add_(gradient.detach().float().cpu())
                     self.transfer_bytes['d2h_gradients'] += gradient.numel() * 4
                 del output, params, weights, values, state_values, grads
+            if update:
+                names=[self.canonical[id(parameter)] for _,parameter in self.specs[index]
+                       if index==0 or self.canonical[id(parameter)]!=embedding_name]
+                self.store.prepare_stage(index,names)
             for (_, parameter), gradient in zip(self.specs[index], accumulated):
                 name = self.canonical[id(parameter)]
                 if name == embedding_name and index != 0:
@@ -253,10 +346,14 @@ class DiskDLS(StreamTrainEngine):
                     for piece in gradient.flatten().split(1048576):
                         norm_squared += piece.double().square().sum().item()
             self.release(slot)
+            if update:
+                self.store.commit_stage(index,cotangents,tied)
             del accumulated
         return math.sqrt(norm_squared), total_loss
 
     def step(self, batches, max_norm=1.):
+        if self.store.manifest['dirty'] or self.store.manifest.get('transaction'):
+            raise RuntimeError('pending transaction: call resume_step before starting another step')
         if not batches or max_norm <= 0:
             raise ValueError('nonempty microbatches and positive clipping threshold required')
         checkpoints = self.boundaries(batches)
@@ -264,11 +361,24 @@ class DiskDLS(StreamTrainEngine):
         if not math.isfinite(norm) or not math.isfinite(loss):
             raise FloatingPointError('nonfinite gradients; disk state unchanged')
         clip = min(1., max_norm / (norm + 1e-6))
-        self.store.begin_step()
-        self.reverse(batches, checkpoints, update=True, clip=clip)
+        durable_torch(self.store.root/'transaction-input.pt',dict(batches=batches,checkpoints=checkpoints,clip=clip,loss=loss,norm=norm))
+        durable_torch(self.store.root/'cursor-initial.pt',dict(cotangents=[None]*len(batches),tied=None))
+        self.store.manifest.update(dirty=True,transaction=dict(next_stage=len(self.stages)-1,cursor='cursor-initial.pt',journal=None))
+        durable_json(self.store.root/'manifest.json',self.store.manifest)
+        self.reverse(batches,checkpoints,update=True,clip=clip,initial_cursor=True)
         self.store.finish_step()
-        self.parameter_version += 1
+        self.parameter_version=self.store.manifest['step']
         return dict(loss=loss, grad_norm=norm)
+
+
+    def resume_step(self):
+        if not self.store.manifest.get('transaction'):
+            raise ValueError('no recoverable transaction')
+        saved=torch.load(self.store.root/'transaction-input.pt',weights_only=True,map_location='cpu')
+        self.reverse(saved['batches'],saved['checkpoints'],update=True,clip=saved['clip'])
+        self.store.finish_step()
+        self.parameter_version=self.store.manifest['step']
+        return dict(loss=saved['loss'],grad_norm=saved['norm'])
 
 
 def estimate_disk_budget(model, batch_size, length, accumulation, dtype):
@@ -292,7 +402,7 @@ def estimate_disk_budget(model, batch_size, length, accumulation, dtype):
     cotangents = accumulation * batch_size * length * (cfg.d_model+graph) * 4 * 2
     cuda_reserve = 2*2**30 if count >= 100_000_000 else 256*2**20
     vram = cotangents + 2*stage_size*(element+4) + stage_size*element + ssm + graph_work + logits + cuda_reserve
-    return dict(parameters=count, state_disk_bytes=12*count, disk_reserve_bytes=2*2**30,
+    return dict(parameters=count, state_disk_bytes=12*count, disk_reserve_bytes=2*2**30 +12*stage_size+3*boundaries+2*model.embedding.weight.numel()*4,
                 estimated_host_bytes=host, estimated_cuda_bytes=vram,
                 boundary_bytes=boundaries, largest_stage_parameters=stage_size)
 
@@ -301,18 +411,29 @@ def disk_train(cfg, tokens, root, steps, device='cpu', dtype=torch.float32, lr=.
                batch_size=1, sequence_length=8, accumulation=1, seed=42, resume=False, progress=None):
     import hashlib
     import time
+    if cfg.proof_enabled:
+        raise ValueError('shared proof core requires resident structured training')
     if steps < 0 or accumulation < 1 or batch_size < 1 or sequence_length < 1 or lr <= 0:
         raise ValueError('invalid disk training schedule')
-    tokens = tokens.cpu().long()
-    if tokens.ndim != 2 or tokens.shape[1] < sequence_length+1:
-        raise ValueError('insufficient token data')
-    if tokens.min() < 0 or tokens.max() >= cfg.vocab_size:
-        raise ValueError('token IDs exceed vocabulary')
+    mapped = hasattr(tokens,'sample') and hasattr(tokens,'manifest')
+    if mapped:
+        if cfg.vocab_size < 256:
+            raise ValueError('mapped byte shard needs vocabulary256')
+        fingerprint=hashlib.sha256(json.dumps(tokens.manifest,sort_keys=True).encode()).hexdigest()
+        shape=['mapped',len(tokens.records)]
+    else:
+        tokens = tokens.cpu().long()
+        if tokens.ndim != 2 or tokens.shape[1] < sequence_length+1:
+            raise ValueError('insufficient token data')
+        if tokens.min() < 0 or tokens.max() >= cfg.vocab_size:
+            raise ValueError('token IDs exceed vocabulary')
+        fingerprint=hashlib.sha256(tokens.numpy().tobytes()).hexdigest()
+        shape=list(tokens.shape)
     with torch.device('meta'):
         from morph import MorphModel
         model = MorphModel(cfg)
-    settings = dict(fingerprint=hashlib.sha256(tokens.numpy().tobytes()).hexdigest(),
-                    shape=list(tokens.shape), lr=lr, seed=seed, device=torch.device(device).type,
+    settings = dict(fingerprint=fingerprint,
+                    shape=shape, lr=lr, seed=seed, device=torch.device(device).type,
                     dtype=str(dtype), batch_size=batch_size, sequence_length=sequence_length,
                     accumulation=accumulation)
     store = DiskState.open(root, model) if resume else DiskState.create(root, model, seed=seed)
@@ -324,19 +445,24 @@ def disk_train(cfg, tokens, root, steps, device='cpu', dtype=torch.float32, lr=.
     durable_json(store.root / 'manifest.json', store.manifest)
     trainer = DiskDLS(model, store, device=device, dtype=dtype, lr=lr, async_mode=device.startswith('cuda'))
     start_step = store.manifest['step']
+    if store.manifest.get('transaction'):
+        trainer.resume_step()
     if device.startswith('cuda'):
         torch.cuda.reset_peak_memory_stats(device)
     started = time.perf_counter()
     final = None
-    for step in range(start_step, steps):
+    for step in range(store.manifest['step'], steps):
         # Stateless step seed makes completed-step resume deterministic without
         # storing huge activation checkpoints or a mutable sampler state.
         generator = torch.Generator().manual_seed(seed + step)
         batches = []
         for _ in range(accumulation):
-            rows = torch.randint(tokens.shape[0], (batch_size,), generator=generator)
-            starts = torch.randint(tokens.shape[1]-sequence_length, (batch_size,), generator=generator)
-            batches.append(torch.stack([tokens[r, s:s+sequence_length+1] for r, s in zip(rows, starts)]))
+            if mapped:
+                batches.append(tokens.sample(generator,batch_size,sequence_length+1))
+            else:
+                rows = torch.randint(tokens.shape[0], (batch_size,), generator=generator)
+                starts = torch.randint(tokens.shape[1]-sequence_length, (batch_size,), generator=generator)
+                batches.append(torch.stack([tokens[r, s:s+sequence_length+1] for r, s in zip(rows, starts)]))
         final = trainer.step(batches)
         if progress is not None:
             progress(step+1, final['loss'])

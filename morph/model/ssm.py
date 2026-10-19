@@ -21,9 +21,33 @@ def selective_scan(x, dt, a, b, c, state):
     return torch.stack(outputs, dim=1), state
 
 
+def chunked_scan(x, dt, a, b, c, state, chunk_size=32):
+    """Parallel affine scan inside bounded chunks, stable for negative A.
+
+    No inverse products are formed. Masked exponent differences are nonpositive,
+    avoiding prefix-product division and its long-sequence underflow problem.
+    """
+    outputs = []
+    for start in range(0, x.shape[1], chunk_size):
+        end = min(start + chunk_size, x.shape[1])
+        da = dt[:, start:end] * a
+        prefix = da.cumsum(1)
+        difference = prefix.transpose(1, 2)[..., :, None] - prefix.transpose(1, 2)[..., None, :]
+        causal = torch.ones(end-start, end-start, device=x.device, dtype=torch.bool).tril()
+        transition = difference.masked_fill(~causal, -torch.inf).exp()
+        drive = (da.expm1() / a)[..., None, None] * x[:, start:end, :, :, None] * b[:, start:end, :, None, :]
+        states = torch.einsum('bhts,bshpn->bthpn', transition, drive)
+        states = states + prefix.exp()[..., None, None] * state[:, None]
+        outputs.append((states * c[:, start:end, :, None, :]).sum(-1))
+        state = states[:, -1]
+    return torch.cat(outputs, 1), state
+
+
 class SelectiveSSM(nn.Module):
     def __init__(self, cfg):
         super().__init__()
+        self.backend = cfg.ssm_backend
+        self.chunk_size = cfg.scan_chunk_size
         self.inner = cfg.d_model * cfg.expand
         self.heads = self.inner // cfg.head_dim
         self.head_dim, self.d_state = cfg.head_dim, cfg.d_state
@@ -52,6 +76,8 @@ class SelectiveSSM(nn.Module):
             state = u.new_zeros(expected)
         elif state.shape != expected or state.device != u.device or state.dtype != u.dtype:
             raise ValueError('SSM state shape, device, and dtype must match its input')
-        y, state = selective_scan(u, dt, -self.a_log.to(u.dtype).exp(), b, c, state)
+        arguments = (u, dt, -self.a_log.to(u.dtype).exp(), b, c, state)
+        y, state = (chunked_scan(*arguments, self.chunk_size) if self.backend == 'parallel'
+                    else selective_scan(*arguments))
         y = y + u * self.skip[None, None, :, None]
         return self.out_proj(y.flatten(-2) * F.silu(gate)), state
