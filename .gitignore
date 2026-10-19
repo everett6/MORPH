@@ -1,0 +1,22 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pt
+*.tmp
+checkpoints/
+*.egg-info/
+
+# Local credentials and environments
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# Training data and disk-backed model state
+*.bin
+*.safetensors
+*-disk-state/
+disk-state/
+datasets/
+runs/

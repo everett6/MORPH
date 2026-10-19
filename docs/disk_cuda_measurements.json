@@ -1,0 +1,26 @@
+{
+  "resident": {
+    "elapsed_seconds": 2.1282894739997573,
+    "tokens_per_second": 22.55332302602248,
+    "peak_cuda_allocated_bytes": 68094976,
+    "transfer_bytes": {},
+    "peak_rss_bytes": 2403119104,
+    "final_loss": 5.482975721359253
+  },
+  "disk": {
+    "step": 3,
+    "final": {
+      "loss": 5.500885486602783,
+      "grad_norm": 2.1684820491687256
+    },
+    "state_dir": "/tmp/morph-disk-bench-njsyjych/state",
+    "elapsed_seconds": 2.9302187209978,
+    "tokens_per_second": 16.381029735437295,
+    "peak_rss_bytes": 2101497856,
+    "peak_cuda_allocated_bytes": 67630080,
+    "transfer_bytes": {
+      "h2d_weights": 2004096,
+      "d2h_gradients": 2201472
+    }
+  }
+}

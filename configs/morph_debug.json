@@ -1,0 +1,14 @@
+{
+  "vocab_size": 256,
+  "d_model": 32,
+  "num_layers": 2,
+  "d_ff": 64,
+  "expand": 2,
+  "d_state": 8,
+  "head_dim": 16,
+  "graph_enabled": true,
+  "d_graph": 16,
+  "graph_nodes": 4,
+  "graph_interval": 2,
+  "reasoning_steps": 4
+}
