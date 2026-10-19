@@ -49,6 +49,8 @@ class Hyperedge:
     sources: tuple[int, ...]
     target: int
     relation: Relation
+    certified: bool = False
+    proof_hash: str | None = None
 
     def __post_init__(self):
         object.__setattr__(self, 'sources', tuple(self.sources))
@@ -71,6 +73,8 @@ class ProofGraph:
         self.nodes[node.node_id] = copy.deepcopy(node)
 
     def connect(self, edge):
+        if edge.certified or edge.proof_hash:
+            raise ValueError('certified dependencies require the checker certification interface')
         if any(index not in self.nodes for index in (*edge.sources, edge.target)):
             raise ValueError('dependency refers to missing node')
         if edge not in self.edges:
@@ -108,9 +112,54 @@ class ProofGraph:
         graph.edges = [Hyperedge(**edge) for edge in record['edges']]
         graph.stopped = record.get('stopped', False)
         for edge in graph.edges:
+            if edge.certified and (not (evidence or {}).get(edge.target) or edge.proof_hash!=evidence[edge.target].proof_hash):
+                raise ValueError('certified edge restoration requires matching checker evidence')
             if any(i not in graph.nodes for i in (*edge.sources, edge.target)):
                 raise ValueError('invalid restored edge')
         return graph
 
     def digest(self):
         return hashlib.sha256(json.dumps(self.snapshot(), sort_keys=True).encode()).hexdigest()
+
+
+def _certification_cycle(graph,extra):
+    dependencies={}
+    for edge in [*graph.edges,extra]:
+        if edge.certified or edge is extra:
+            dependencies.setdefault(edge.target,[]).extend(edge.sources)
+    visiting,finished=set(),set()
+    def visit(node):
+        if node in visiting:return True
+        if node in finished:return False
+        visiting.add(node)
+        if any(visit(source) for source in dependencies.get(node,[])):return True
+        visiting.remove(node);finished.add(node);return False
+    return any(visit(node) for node in dependencies)
+
+
+def certify_edge(graph,index,result):
+    from dataclasses import replace
+    edge=graph.edges[index];target=graph.nodes[edge.target]
+    if any(graph.nodes[source].status!=Status.VERIFIED for source in edge.sources):
+        raise ValueError('all inference premises need independent checker evidence')
+    if any(not set(graph.nodes[source].assumptions).issubset(target.assumptions) for source in edge.sources):
+        raise ValueError('premise assumptions exceed conclusion assumptions')
+    if _certification_cycle(graph,edge):raise ValueError('circular certified justification')
+    # A receipt for the exact conclusion is mandatory; verified sources alone
+    # never turn a speculative dependency into a mathematical proof.
+    graph.accept_verification(edge.target,result)
+    graph.edges[index]=replace(edge,certified=True,proof_hash=result.proof_hash)
+
+
+def obligation_closed(graph,node_id):
+    visiting=set()
+    def closed(index):
+        node=graph.nodes[index]
+        if index in visiting or node.status!=Status.VERIFIED or not node.proof_hash:return False
+        visiting.add(index)
+        for edge in graph.edges:
+            if edge.target!=index or edge.relation not in (Relation.REQUIRES,Relation.PROVED_BY):continue
+            if not edge.certified or not edge.proof_hash:return False
+            if any(not set(graph.nodes[source].assumptions).issubset(node.assumptions) or not closed(source) for source in edge.sources):return False
+        visiting.remove(index);return True
+    return closed(node_id)

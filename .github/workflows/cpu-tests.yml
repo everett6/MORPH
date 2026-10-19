@@ -17,3 +17,6 @@ jobs:
       - run: python -m pytest -q
       - run: python train.py --proof-traces docs/proof_examples.jsonl --steps 2 --checkpoint /tmp/proof.pt
       - run: python evaluate.py --checkpoint /tmp/proof.pt --proof-traces docs/proof_examples.jsonl
+      - run: python train.py --proof-traces docs/proof_examples.jsonl --engine dls --steps 2 --checkpoint /tmp/proof-dls.pt
+      - run: python train.py --proof-traces docs/proof_examples.jsonl --engine disk --state-dir /tmp/proof-disk --steps 1
+      - run: python train.py --proof-traces docs/proof_examples.jsonl --engine disk --state-dir /tmp/proof-disk --resume-store --steps 2

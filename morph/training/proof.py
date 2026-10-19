@@ -11,7 +11,9 @@ def joint_loss(outputs, tokens, graph, actions, targets, values, weights=None):
     if not target_mask.gather(1,targets[:,None]).all():
         raise ValueError('teacher target is inactive')
     active = graph['active'][:,:,None] & graph['active'][:,None,:]
-    losses = dict(token=F.cross_entropy(outputs['logits'][:,:-1].reshape(-1,outputs['logits'].shape[-1]), tokens[:,1:].reshape(-1)),
+    token_loss=F.cross_entropy(outputs['logits'][:,:-1].reshape(-1,outputs['logits'].shape[-1]),tokens[:,1:].reshape(-1),reduction='none').reshape(tokens.shape[0],-1)
+    text_mask=graph.get('loss_mask',graph.get('text_mask',torch.ones_like(tokens,dtype=torch.bool)))[:,1:]
+    losses = dict(token=(token_loss*text_mask).sum()/text_mask.sum().clamp_min(1),
                   graph=F.cross_entropy(outputs['dependency_logits'][active], graph['dependency_labels'][active]),
                   action=F.cross_entropy(outputs['action_logits'],actions),
                   target=F.cross_entropy(outputs['target_logits'][torch.arange(actions.shape[0],device=actions.device),actions],targets),

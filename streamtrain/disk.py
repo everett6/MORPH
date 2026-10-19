@@ -14,7 +14,7 @@ import numpy as np
 import torch
 from torch.func import functional_call
 from torch.nn import functional as F
-from .engine import StreamTrainEngine
+from .engine import StreamTrainEngine,make_stages,unpack_batch,stage_loss
 
 
 def durable_json(path, data):
@@ -212,17 +212,13 @@ class DiskDLS(StreamTrainEngine):
     def __init__(self, model, store, device='cpu', dtype=torch.float32, lr=.001, async_mode=False):
         # Parent requires CPU parameters; meta definitions allocate no canonical model.
         # Build parent with a temporary metadata-only override of that check.
-        if model.config.proof_enabled:
-            raise ValueError('shared proof core is not registered for disk streaming')
         self.store, self.lr = store, lr
         self.model, self.device, self.dtype = model, torch.device(device), dtype
         self.async_mode = async_mode
         if async_mode and self.device.type != 'cuda':
             raise ValueError('asynchronous disk fetch requires CUDA')
         from .engine import Stage, Slot
-        self.stages = [Stage(model.embedding, 'embedding')]
-        self.stages += [Stage(block, 'block') for block in model.blocks]
-        self.stages += [Stage(model.norm, 'head', model.embedding)]
+        self.stages=make_stages(model)
         self.specs = [list(stage.named_parameters()) for stage in self.stages]
         self.canonical = {id(p): name for name, p in model.named_parameters()}
         maximum = max(sum(p.numel() for _, p in spec) for spec in self.specs)
@@ -268,7 +264,8 @@ class DiskDLS(StreamTrainEngine):
     def boundaries(self, batches):
         checkpoints = []
         for batch in batches:
-            state = (batch[:, :-1].to(self.device), None)
+            tokens,proof_graph=unpack_batch(batch,self.device)
+            state = (tokens.to(self.device) if proof_graph is not None else tokens[:, :-1].to(self.device), None)
             saved = []
             self.load(0, self.slots[0])
             for index in range(len(self.stages)-1):
@@ -306,6 +303,7 @@ class DiskDLS(StreamTrainEngine):
                 self.load(index-1, self.slots[(index-1) % 2])
             accumulated = [torch.zeros(p.shape) for _, p in self.specs[index]]
             for micro, batch in enumerate(batches):
+                _,proof_graph=unpack_batch(batch,self.device)
                 params = self.parameters(index, slot, True)
                 state = tuple(v.to(self.device).detach().requires_grad_(bool(index)) if v is not None else None
                               for v in checkpoints[micro][index])
@@ -313,9 +311,9 @@ class DiskDLS(StreamTrainEngine):
                 weights = [params[name] for name, _ in self.specs[index]]
                 values = state_values + weights
                 with torch.enable_grad(), torch.autocast(self.device.type, dtype=self.dtype, enabled=self.dtype == torch.bfloat16):
-                    output = functional_call(self.stages[index], params, state)
+                    output = functional_call(self.stages[index], params, (*state,proof_graph))
                     if cotangents[micro] is None:
-                        loss = F.cross_entropy(output.float().flatten(0, 1), batch[:, 1:].to(self.device).flatten())
+                        loss = stage_loss(output,batch,self.device)
                         total_loss += loss.detach().item() / len(batches)
                         grads = torch.autograd.grad(loss / len(batches), values, allow_unused=True)
                     else:
@@ -385,9 +383,7 @@ def estimate_disk_budget(model, batch_size, length, accumulation, dtype):
     """Conservative allocation envelope, not a measured peak-memory guarantee."""
     from .engine import Stage
     cfg = model.config
-    stages = [Stage(model.embedding, 'embedding')]
-    stages += [Stage(block, 'block') for block in model.blocks]
-    stages += [Stage(model.norm, 'head', model.embedding)]
+    stages=make_stages(model)
     stage_size = max(sum(p.numel() for p in stage.parameters()) for stage in stages)
     largest = max(p.numel() for p in model.parameters())
     count = sum(p.numel() for p in model.parameters())
@@ -400,8 +396,9 @@ def estimate_disk_budget(model, batch_size, length, accumulation, dtype):
     graph_work = batch_size*length*graph*cfg.reasoning_steps*4*16
     logits = batch_size*length*cfg.vocab_size*4*4
     cotangents = accumulation * batch_size * length * (cfg.d_model+graph) * 4 * 2
-    cuda_reserve = 2*2**30 if count >= 100_000_000 else 256*2**20
-    vram = cotangents + 2*stage_size*(element+4) + stage_size*element + ssm + graph_work + logits + cuda_reserve
+    cuda_reserve = 2*2**30 if stage_size >= 50_000_000 else 256*2**20+4*stage_size
+    proof_work = batch_size*cfg.graph_nodes*cfg.statement_field_length*3*cfg.d_model*4*8 if cfg.proof_enabled else 0
+    vram = proof_work + cotangents + 2*stage_size*(element+4) + stage_size*element + ssm + graph_work + logits + cuda_reserve
     return dict(parameters=count, state_disk_bytes=12*count, disk_reserve_bytes=2*2**30 +12*stage_size+3*boundaries+2*model.embedding.weight.numel()*4,
                 estimated_host_bytes=host, estimated_cuda_bytes=vram,
                 boundary_bytes=boundaries, largest_stage_parameters=stage_size)
@@ -412,7 +409,7 @@ def disk_train(cfg, tokens, root, steps, device='cpu', dtype=torch.float32, lr=.
     import hashlib
     import time
     if cfg.proof_enabled:
-        raise ValueError('shared proof core requires resident structured training')
+        raise ValueError('use structured proof training entry point for joint proof batches')
     if steps < 0 or accumulation < 1 or batch_size < 1 or sequence_length < 1 or lr <= 0:
         raise ValueError('invalid disk training schedule')
     mapped = hasattr(tokens,'sample') and hasattr(tokens,'manifest')

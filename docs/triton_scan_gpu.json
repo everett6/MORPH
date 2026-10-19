@@ -1,0 +1,26 @@
+{
+  "shape": {
+    "batch": 1,
+    "length": 1024,
+    "heads": 4,
+    "channels": 8,
+    "state": 16
+  },
+  "precision": "fp32",
+  "torch_version": "2.14.0+cu130",
+  "results": {
+    "parallel": {
+      "seconds": 0.2085919509991072,
+      "iterations": 5,
+      "peak_cuda_bytes": 73662464,
+      "tokens_per_second": 24545.530043112325
+    },
+    "triton": {
+      "seconds": 0.025160692995996214,
+      "iterations": 5,
+      "peak_cuda_bytes": 68857856,
+      "tokens_per_second": 203492.0103677088
+    }
+  },
+  "claim": "single primitive microbenchmark; not model throughput or deterministic gradients"
+}

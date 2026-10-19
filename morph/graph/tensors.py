@@ -4,15 +4,15 @@ from .schema import Status
 from .controller import valid_actions
 
 
-def tensorize(graphs, capacity, statement_length=64, device='cpu'):
+def tensorize(graphs, capacity, statement_length=128, device='cpu'):
     batch = len(graphs)
     max_edges = max(1, max(len(g.edges) for g in graphs))
     max_sources = max(1, max((len(e.sources) for g in graphs for e in g.edges), default=1))
     result = dict(node_types=torch.zeros(batch, capacity, dtype=torch.long),
                   statuses=torch.zeros(batch, capacity, dtype=torch.long),
                   active=torch.zeros(batch, capacity, dtype=torch.bool),
-                  tokens=torch.zeros(batch, capacity, statement_length, dtype=torch.long),
-                  token_mask=torch.zeros(batch, capacity, statement_length, dtype=torch.bool),
+                  tokens=torch.zeros(batch, capacity, statement_length*3, dtype=torch.long),
+                  token_mask=torch.zeros(batch, capacity, statement_length*3, dtype=torch.bool),
                   sources=torch.zeros(batch, max_edges, max_sources, dtype=torch.long),
                   targets=torch.zeros(batch, max_edges, dtype=torch.long),
                   relations=torch.zeros(batch, max_edges, dtype=torch.long),
@@ -32,9 +32,14 @@ def tensorize(graphs, capacity, statement_length=64, device='cpu'):
             result['node_types'][row,index] = node.node_type
             result['statuses'][row,index] = node.status
             result['active'][row,index] = node.status not in (Status.BLOCKED, Status.REFUTED)
-            encoded = list(node.statement.encode('utf8'))[:statement_length]
-            result['tokens'][row,index,:len(encoded)] = torch.tensor(encoded)
-            result['token_mask'][row,index,:len(encoded)] = True
+            fields=(node.statement,node.formal_statement or '', '\n'.join(node.assumptions))
+            for field,text in enumerate(fields):
+                encoded=list(text.encode('utf8'))
+                if len(encoded)>statement_length:
+                    raise ValueError('symbolic field exceeds explicit statement capacity; increase statement_field_length')
+                start=field*statement_length
+                result['tokens'][row,index,start:start+len(encoded)]=torch.tensor(encoded)
+                result['token_mask'][row,index,start:start+len(encoded)]=True
         if not result['active'][row].any():
             raise ValueError('at least one active node required')
         for e, edge in enumerate(graph.edges):

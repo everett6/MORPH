@@ -123,22 +123,28 @@ nonfinite optimizer rejection, and exact checkpoint/resume with accumulation.
 ## Architectural scope and roadmap
 
 The SSM now defaults to a bounded chunk-parallel affine scan with a scalar
-reference and forward/backward equivalence checks. It is not a fused Mamba-2
-kernel or compatible pretrained checkpoint implementation; causal convolution
+reference and forward/backward equivalence checks. An opt-in fused Triton scan
+has tested CUDA forward/backward kernels; this is not a fused Mamba-2 kernel or compatible pretrained checkpoint implementation; causal convolution
 is not implemented.
 
 The causal language-model baseline retains neural ring memory. Opt-in
 `proof_enabled` adds typed symbolic graph inputs, external deterministic graph
 actions/replay, a separate shared post-backbone reasoning core, action-conditioned
 node selection, dependency/value heads, and joint teacher-forced losses.
-Structured proof training currently requires resident FP32 execution; streaming
-rejects that mode rather than omit its parameters.
+Structured proof training supports resident, synchronous DLS, asynchronous double
+buffers, and recoverable disk AdamW, including all joint losses and tied weights.
+Ordered statement/formal/assumption encoding and graph-only token conditioning
+preserve causality. Model-generated JSON payloads drive learned action/target
+rollouts, with real isolated Lean receipts required for certification.
 
 [The audit implementation guide](docs/audit_implementation.md) contains commands,
-actual 100M CPU timing evidence, typed proof/data/Lean interfaces, transactional
+actual 100M CPU/GPU timing evidence, typed proof/data/Lean interfaces, transactional
 disk recovery, and remaining empirical gates. Real Lean integration is skipped
-when Lean is absent. No verified proof success, architectural superiority, or
-validated full 7B/15B training throughput is claimed.
+when Lean is absent. Local isolated Lean verified tiny supervised toy rollouts;
+this does not establish held-out mathematical generalization, autonomous repair
+success, architectural superiority, or full 7B/15B throughput.
+See [the second audit integration](docs/proof_streaming_integration.md) for
+reproducible toolchain, streaming proof training, and own-goal inference commands.
 
 Muon follows the algorithm in the author's [primary implementation](https://github.com/KellerJordan/Muon/blob/master/muon.py),
 using FP32 Newton-Schulz iterations as a reproducible CPU baseline instead of

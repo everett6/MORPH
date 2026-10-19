@@ -1,0 +1,118 @@
+{
+  "training_steps": 400,
+  "training_loss_first": 10.745302200317383,
+  "training_loss_last": 0.006435266230255365,
+  "elapsed_seconds": 5.626138628998888,
+  "model_generated_payloads": true,
+  "runtime_tactic_fallback": false,
+  "seeded_training_failure": {
+    "success": false,
+    "statement": "∀ n m : Nat, n + m = m + n",
+    "assumptions": [],
+    "proof_hash": null,
+    "checker": "lean4",
+    "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)",
+    "diagnostics": "/tmp/morph-lean-8fdq2wis/Candidate.lean:3:60: error: simp made no progress\n'morph_candidate' depends on axioms: [sorryAx]\n",
+    "isolated": true,
+    "project_revision": "c44e0c8ee63ca166450922a373c7409c5d26b00b"
+  },
+  "searches": [
+    {
+      "kind": "heldout_toy",
+      "statement": "True ∧ True",
+      "success": true,
+      "events": [
+        {
+          "attempt": 0,
+          "decoded": {
+            "valid": true,
+            "payload": {
+              "proof": "by simp"
+            },
+            "raw": "{\"proof\": \"by simp\"}",
+            "model_generated": true
+          },
+          "verification": {
+            "success": true,
+            "statement": "True ∧ True",
+            "assumptions": [],
+            "proof_hash": "c29fdc3bcfc50584bd161552ef706d439acbe7ae3df8be0ba15ad281cd300574",
+            "checker": "lean4",
+            "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)",
+            "diagnostics": "'morph_candidate' depends on axioms: [propext]\n",
+            "isolated": true,
+            "project_revision": "c44e0c8ee63ca166450922a373c7409c5d26b00b"
+          }
+        }
+      ],
+      "graph": {
+        "nodes": [
+          {
+            "node_id": 0,
+            "statement": "True ∧ True",
+            "node_type": 0,
+            "status": 2,
+            "formal_statement": "True ∧ True",
+            "assumptions": [],
+            "provenance": {
+              "checker": "lean4",
+              "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)"
+            },
+            "proof_hash": "c29fdc3bcfc50584bd161552ef706d439acbe7ae3df8be0ba15ad281cd300574"
+          }
+        ],
+        "edges": [],
+        "stopped": false
+      }
+    },
+    {
+      "kind": "trained_repair_fixture",
+      "statement": "∀ n m : Nat, n + m = m + n",
+      "success": true,
+      "events": [
+        {
+          "attempt": 0,
+          "decoded": {
+            "valid": true,
+            "payload": {
+              "proof": "by intro n m; omega"
+            },
+            "raw": "{\"proof\": \"by intro n m; omega\"}",
+            "model_generated": true
+          },
+          "verification": {
+            "success": true,
+            "statement": "∀ n m : Nat, n + m = m + n",
+            "assumptions": [],
+            "proof_hash": "fe94e84c23c805ebe47a8d92ef6facf51c94ae0bba879d1e5af9deb90a7a3a9b",
+            "checker": "lean4",
+            "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)",
+            "diagnostics": "'morph_candidate' depends on axioms: [propext, Quot.sound]\n",
+            "isolated": true,
+            "project_revision": "c44e0c8ee63ca166450922a373c7409c5d26b00b"
+          }
+        }
+      ],
+      "graph": {
+        "nodes": [
+          {
+            "node_id": 0,
+            "statement": "∀ n m : Nat, n + m = m + n",
+            "node_type": 0,
+            "status": 2,
+            "formal_statement": "∀ n m : Nat, n + m = m + n",
+            "assumptions": [],
+            "provenance": {
+              "checker": "lean4",
+              "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)"
+            },
+            "proof_hash": "fe94e84c23c805ebe47a8d92ef6facf51c94ae0bba879d1e5af9deb90a7a3a9b"
+          }
+        ],
+        "edges": [],
+        "stopped": false
+      }
+    }
+  ],
+  "claims": "tiny supervised proof/repair fixture, not architecture superiority or novel theorem discovery"
+}

@@ -58,6 +58,7 @@ class MorphOutput:
     logits: torch.Tensor
     states: tuple[torch.Tensor, ...]
     hidden: torch.Tensor | None = None
+    raw_hidden: torch.Tensor | None = None
 
 
 class MorphModel(nn.Module):
@@ -73,6 +74,8 @@ class MorphModel(nn.Module):
         if cfg.proof_enabled:
             from .reasoning_core import ReasoningCore
             self.reasoning = ReasoningCore(cfg)
+            from .proof_head import ProofHead
+            self.proof_head=ProofHead(self)
         self.apply(self._initialize)
 
     @staticmethod
@@ -80,7 +83,7 @@ class MorphModel(nn.Module):
         if isinstance(module, (nn.Linear, nn.Embedding)):
             nn.init.normal_(module.weight, std=0.02)
 
-    def forward(self, input_ids, states=None):
+    def encode(self, input_ids, states=None):
         if input_ids.ndim != 2 or input_ids.shape[1] == 0:
             raise ValueError('input_ids must be [batch, nonempty sequence]')
         if states is not None and len(states) != len(self.blocks):
@@ -95,8 +98,12 @@ class MorphModel(nn.Module):
             else:
                 x, state, graph_memory = block(x, state, graph_memory, True)
             result.append(state)
-        hidden = self.norm(x)
-        return MorphOutput(self.lm_head(hidden), tuple(result), hidden)
+        return x,tuple(result)
+
+    def forward(self,input_ids,states=None):
+        x,result=self.encode(input_ids,states)
+        hidden=self.norm(x)
+        return MorphOutput(self.lm_head(hidden),result,hidden,x)
 
     def loss(self, tokens):
         if tokens.shape[1] < 2:
@@ -105,12 +112,8 @@ class MorphModel(nn.Module):
         return F.cross_entropy(logits.float().reshape(-1, self.config.vocab_size), tokens[:, 1:].reshape(-1))
 
 
-    def forward_proof(self, input_ids, graph):
+    def forward_proof(self, input_ids, graph, states=None):
         if not self.config.proof_enabled:
             raise ValueError('proof_enabled configuration is required')
-        output = self(input_ids)
-        embeddings = self.embedding(graph['tokens'])
-        mask = graph['token_mask'][..., None]
-        nodes = (embeddings*mask).sum(-2)/mask.sum(-2).clamp_min(1)
-        heads = self.reasoning(output.hidden, nodes, graph)
-        return dict(logits=output.logits, **heads)
+        hidden,new_states=self.encode(input_ids,states)
+        return dict(**self.proof_head(hidden,None,graph),states=new_states)

@@ -27,7 +27,9 @@ class ReasoningCore(nn.Module):
         active = graph['active']
         state = self.node_projection(node_embeddings) + self.node_types(graph['node_types']) + self.statuses(graph['statuses'])
         state = state * active[...,None]
-        context = self.context(hidden.mean(1))[:,None]
+        text_mask=graph.get('text_mask',torch.ones(hidden.shape[:2],device=hidden.device,dtype=torch.bool))
+        pooled_hidden=(hidden*text_mask[...,None]).sum(1)/text_mask.sum(1,keepdim=True).clamp_min(1)
+        context = self.context(pooled_hidden)[:,None]
         iterations = []
         for _ in range(self.steps):
             message = aggregate_hyperedges(state, graph['sources'], graph['targets'], graph['source_mask'], self.relations(graph['relations']))

@@ -41,26 +41,52 @@ def main():
     cfg = MorphConfig.from_file(args.config)
     if args.proof_traces:
         if args.optimizer!='adamw':parser.error('structured proof mode supports AdamW only')
-        if args.batch_size!=1 or args.accumulation!=1 or args.precision!='fp32' or args.muon_lr is not None or args.resume or args.resume_store or args.activation_checkpointing:
-            parser.error('proof mode supports batch1/accumulation1/FP32 AdamW and fresh checkpoints only')
-        if args.engine != 'resident':
-            parser.error('shared proof core currently requires resident training; streaming integration is not implemented')
+        if args.muon_lr is not None or args.activation_checkpointing:
+            parser.error('proof mode currently uses AdamW and stage replay; Muon/checkpoint flags are unsupported')
         from dataclasses import replace
         proof_cfg=replace(cfg,proof_enabled=True)
         with torch.device('meta'):
             proof_probe=MorphModel(proof_cfg)
         proof_count=sum(p.numel() for p in proof_probe.parameters())
-        available=int(next(line.split()[1] for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemAvailable:')))*1024
+        from streamtrain.disk import estimate_disk_budget
+        import shutil
+        budget=estimate_disk_budget(proof_probe,args.batch_size,args.sequence_length,args.accumulation,
+                                    torch.bfloat16 if args.precision=='bf16' else torch.float32)
+        # JSON parsing, saved checkpoint loading, and proof-field activations need
+        # their own host envelope even when canonical weights live elsewhere.
+        data_bytes=args.proof_traces.stat().st_size*40 if args.proof_traces.exists() else 0
+        resume_bytes=proof_count*16 if args.resume else 0
+        field_bytes=args.batch_size*proof_cfg.graph_nodes*3*proof_cfg.statement_field_length*proof_cfg.d_model*4*8
+        host_available=int(next(line.split()[1] for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemAvailable:')))*1024
+        if args.engine=='resident':
+            host_need=(proof_count*24+field_bytes+512*2**20 if not args.device.startswith('cuda') else 512*2**20)+data_bytes+resume_bytes
+            cuda_need=proof_count*24+field_bytes+budget['estimated_cuda_bytes']
+        else:
+            host_need=budget['estimated_host_bytes']+data_bytes+resume_bytes+(proof_count*16 if args.engine!='disk' else 0)
+            if not args.device.startswith('cuda'):host_need+=budget['estimated_cuda_bytes']
+            cuda_need=budget['estimated_cuda_bytes']
+        qualification=dict(estimated_host_bytes=host_need,estimated_cuda_bytes=cuda_need,disk_budget=budget)
+        if args.inspect:
+            print(json.dumps(dict(parameters=proof_count,proof_enabled=True,qualification=qualification)))
+            return
+        if host_need>host_available*.75:
+            parser.error('structured proof host-memory estimate exceeds available RAM with headroom; use smaller config/batch/sequence')
         if args.device.startswith('cuda'):
             if not torch.cuda.is_available():parser.error('CUDA unavailable')
-            available=torch.cuda.mem_get_info(args.device)[0]
-        if args.inspect:
-            print(json.dumps(dict(parameters=proof_count,proof_enabled=True)))
-            return
-        if proof_count*24+512*2**20>available*.75:
-            parser.error('structured resident proof training exceeds available-memory envelope; use debug configuration')
+            if cuda_need>torch.cuda.mem_get_info(args.device)[0]*.8:
+                parser.error('structured proof GPU-memory estimate exceeds free VRAM with headroom')
+        if args.engine=='disk':
+            if args.checkpoint or args.resume:parser.error('disk proof state is its checkpoint; use --resume-store')
+            if args.state_dir is None:parser.error('disk proof mode requires --state-dir')
+            parent=args.state_dir.parent
+            while not parent.exists():parent=parent.parent
+            needed=budget['disk_reserve_bytes']+(0 if args.resume_store else budget['state_disk_bytes'])
+            if needed>shutil.disk_usage(parent).free:
+                parser.error('insufficient disk for proof state and recovery journal, including resume reserve')
         from morph.training.proof_runner import run_proof_training
-        _, losses = run_proof_training(cfg,args.proof_traces,args.steps,args.lr,args.device,args.checkpoint,sequence_length=args.sequence_length)
+        _, losses = run_proof_training(cfg,args.proof_traces,args.steps,args.lr,args.device,args.checkpoint,sequence_length=args.sequence_length,engine=args.engine,
+                                         batch_size=args.batch_size,accumulation=args.accumulation,
+                                         dtype=torch.bfloat16 if args.precision=='bf16' else torch.float32,state_dir=args.state_dir,resume=bool(args.resume or args.resume_store),checkpoint_every=args.checkpoint_every,resume_path=args.resume,seed=args.seed)
         print(json.dumps(dict(structured_steps=len(losses),losses=losses)))
         return
     with torch.device('meta'):
