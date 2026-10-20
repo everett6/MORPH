@@ -1,0 +1,88 @@
+{
+  "captured_utc": "2026-10-20T05:05:23.821547+00:00",
+  "live_metrics_snapshot": [
+    {
+      "loss": 5.845005691051483,
+      "grad_norm": 16.230047047319594,
+      "step": 1,
+      "processed_target_tokens": 4096,
+      "step_target_tokens": 4096,
+      "step_seconds": 482.2753795259996,
+      "tokens_per_second": 8.493072990841291,
+      "active_experts": 64,
+      "process_io_bytes": {
+        "read_bytes": 77633417216,
+        "write_bytes": 121424429056
+      },
+      "transfer_bytes": {
+        "h2d_weights": 29879278088,
+        "d2h_gradients": 39853261576
+      },
+      "loss_scale": 128.0
+    },
+    {
+      "loss": 4.484269559383392,
+      "grad_norm": 15.20413886921507,
+      "step": 2,
+      "processed_target_tokens": 8192,
+      "step_target_tokens": 4096,
+      "step_seconds": 527.499248907001,
+      "tokens_per_second": 7.7649399662408465,
+      "active_experts": 64,
+      "process_io_bytes": {
+        "read_bytes": 66997293056,
+        "write_bytes": 121433788416
+      },
+      "transfer_bytes": {
+        "h2d_weights": 59758556176,
+        "d2h_gradients": 79706523152
+      },
+      "loss_scale": 128.0
+    },
+    {
+      "loss": 3.991320550441742,
+      "grad_norm": 16.596779379741104,
+      "step": 3,
+      "processed_target_tokens": 12288,
+      "step_target_tokens": 4096,
+      "step_seconds": 581.7387523939997,
+      "tokens_per_second": 7.040961227258698,
+      "active_experts": 64,
+      "process_io_bytes": {
+        "read_bytes": 67186315264,
+        "write_bytes": 121433788416
+      },
+      "transfer_bytes": {
+        "h2d_weights": 89637834264,
+        "d2h_gradients": 119559784728
+      },
+      "loss_scale": 128.0
+    }
+  ],
+  "gpu_window": {
+    "samples": 30,
+    "seconds": 29.621487379074097,
+    "scope": "partial optimizer/update phase only, not a full-step trace",
+    "mean_utilization_percent": 2.533333333333333,
+    "max_utilization_percent": 7.0,
+    "mean_memory_mib": 2566.233333333333
+  },
+  "disk_window": {
+    "samples": 29,
+    "scope": "separate preceding 29 one-second NVMe intervals; device-wide, not process attribution; first since-boot row excluded",
+    "mean_utilization_percent": 82.69655172413793,
+    "mean_write_await_ms": 103.4696551724138,
+    "mean_queue_depth": 109.88724137931034
+  },
+  "process_window": {
+    "seconds": 30,
+    "cpu_percent_one_core": 23.23,
+    "read_kib_per_second": 59120.27,
+    "write_kib_per_second": 146579.73
+  },
+  "limitations": [
+    "Utilization windows are partial and not simultaneous full-step measurements.",
+    "Process IO read_bytes/write_bytes reflect kernel accounting; transfer_bytes in live metrics are cumulative.",
+    "Other processes share the SSD. Timing differences across live steps do not establish causation."
+  ]
+}

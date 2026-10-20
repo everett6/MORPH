@@ -31,6 +31,8 @@ class DeltaConfig:
     expert_ffn:int=3840
     latent_dim:int=768
     latent_experts:bool=True
+    step_expert_count:int=0
+    routing_seed:int=0
     top_k:int=1
     router_aux_weight:float=.01
     norm_eps:float=1e-6
@@ -38,8 +40,10 @@ class DeltaConfig:
     def __post_init__(self):
         if self.model_type!='delta':raise ValueError('DeltaConfig model_type must be delta')
         for key,value in asdict(self).items():
-            if key in ('model_type','ssm_backend','router_aux_weight','norm_eps') or type(value) is bool:continue
+            if key in ('model_type','ssm_backend','router_aux_weight','norm_eps','step_expert_count','routing_seed') or type(value) is bool:continue
             if type(value) is not int or value<1:raise ValueError(f'{key} must be a positive integer')
+        if type(self.step_expert_count) is not int or not 0<=self.step_expert_count<=self.expert_count:raise ValueError('step_expert_count must be between zero and expert_count')
+        if type(self.routing_seed) is not int or not 0<=self.routing_seed<2**63:raise ValueError('routing_seed must be a nonnegative 63-bit integer')
         if self.vocab_size!=256:raise ValueError('Delta currently uses the fixed 256-byte vocabulary')
         if self.top_k!=1:raise ValueError('only dropless top-1 routing is implemented')
         if self.graph_enabled:raise ValueError('Delta uses typed graph/session memory, not legacy ring exchange')

@@ -56,7 +56,7 @@ class SparseDiskDLS(DiskDLS):
         for micro,state in enumerate(states):saved[micro].append(state)
         return saved
 
-    def reverse(self,batches,checkpoints,update=False,clip=1.,initial_cursor=False):
+    def reverse(self,batches,checkpoints,update=False,clip=1.,initial_cursor=False,gradient_callback=None):
         for index in range(len(self.stages)):
             self.select(index,[saved[index] for saved in checkpoints])
         cotangents=[None]*len(batches);tied=None;start=len(self.stages)-1;pending=set()
@@ -132,8 +132,14 @@ class SparseDiskDLS(DiskDLS):
                     step=self.store.manifest.get('parameter_steps',{}).get(name,0)+1
                     self.store.update(name,gradient,step,self.lr,clip);next_clocks[name]=step
                 else:
+                    if gradient_callback is not None:gradient_callback(index,name,gradient)
                     for piece in gradient.flatten().split(1048576):norm_squared+=piece.double().square().sum().item()
             self.release(slot)
             if update:self.store.commit_stage(index,cotangents,tied,parameter_steps=next_clocks)
             del accumulated
         return math.sqrt(norm_squared),total_loss
+
+    def resume_step(self):
+        if self.store.manifest.get('transaction',{}).get('kind')=='stored-gradients-v1':
+            raise ValueError('stored-gradient transaction requires SinglePassDiskDLS')
+        return super().resume_step()
