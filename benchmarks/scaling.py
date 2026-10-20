@@ -19,7 +19,7 @@ def main():
     parser.add_argument('--component',choices=['model','ssm','graph'],default='model')
     parser.add_argument('--device',default='cpu')
     parser.add_argument('--engine',choices=['resident','async','disk'],default='resident')
-    parser.add_argument('--backend',choices=['reference','parallel'],default='parallel')
+    parser.add_argument('--backend',choices=['reference','parallel','triton'],default='parallel')
     parser.add_argument('--ablation',choices=['ssm','static_graph','graph_recurrence','full_proof'],default='ssm')
     parser.add_argument('--steps',type=int,default=1)
     parser.add_argument('--sequence-length',type=int,default=8)
@@ -35,13 +35,23 @@ def main():
     result=dict(metadata=dict(steps=args.steps,sequence_length=args.sequence_length,batch_size=1,accumulation=1,precision='fp32',seed=42,threads=2,torch_version=str(torch.__version__),cpu_model=cpu),parameters=count,config=cfg.to_dict(),device=args.device,engine=args.engine,ablation=args.ablation,
                 measured=False,verified_proof_success=None)
     available=int(next(line.split()[1] for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemAvailable:')))*1024
-    required=count*20+2*2**30
+    budget=estimate_disk_budget(probe,1,args.sequence_length,1,torch.float32)
+    required_host=count*20+512*2**20 if args.engine=='resident' else budget['estimated_host_bytes']+(count*16 if args.engine=='async' else 0)
+    required_cuda=count*20+512*2**20 if args.engine=='resident' else budget['estimated_cuda_bytes']
+    if args.component!='model':
+        from morph.model.ssm import SelectiveSSM
+        from morph.model.graph import GraphExchange
+        with torch.device('meta'):component=SelectiveSSM(cfg) if args.component=='ssm' else GraphExchange(cfg)
+        parameters=sum(p.numel() for p in component.parameters())
+        required_host=512*2**20
+        required_cuda=parameters*16+budget['estimated_cuda_bytes']-2*budget['largest_stage_parameters']*12
+    result['qualification']=dict(estimated_host_bytes=required_host,estimated_cuda_bytes=required_cuda)
+    if required_host>available*.75:result['skip']='insufficient available RAM for selected residency mode'
     if args.device.startswith('cuda'):
         if not torch.cuda.is_available():result['skip']='CUDA unavailable'
         else:
             free,_=torch.cuda.mem_get_info(args.device)
-            if required>free*.8:result['skip']='insufficient free VRAM for conservative resident budget'
-    elif required>available*.75:result['skip']='insufficient available RAM'
+            if required_cuda>free*.8:result['skip']='insufficient free VRAM for selected stage/component budget'
     if args.ablation=='full_proof':result['skip']='use structured proof training/evaluation; LM-only timing is not a proof ablation'
     if args.engine=='disk':
         import shutil

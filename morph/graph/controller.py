@@ -11,6 +11,8 @@ def valid_actions(graph, target):
     if node is None or node.status in (Status.BLOCKED, Status.REFUTED, Status.VERIFIED):
         for action in (ActionType.EXPAND, ActionType.REVISE, ActionType.DECOMPOSE, ActionType.VERIFY, ActionType.PRUNE):
             result[action] = False
+    if node is not None and node.node_type not in (NodeType.CONJECTURE,NodeType.LEMMA):
+        result[ActionType.REVISE]=False
     if node is None or node.formal_statement is None:
         result[ActionType.VERIFY] = False
     return result

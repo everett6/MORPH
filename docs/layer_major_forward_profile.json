@@ -1,0 +1,89 @@
+{
+  "config": {
+    "vocab_size": 256,
+    "d_model": 128,
+    "num_layers": 8,
+    "d_ff": 256,
+    "expand": 2,
+    "d_state": 8,
+    "head_dim": 32,
+    "ssm_backend": "parallel",
+    "scan_chunk_size": 32,
+    "proof_enabled": false,
+    "statement_field_length": 128,
+    "graph_enabled": true,
+    "graph_update": true,
+    "graph_interval": 4,
+    "d_graph": 32,
+    "graph_nodes": 4,
+    "reasoning_steps": 4,
+    "norm_eps": 1e-06
+  },
+  "parameters": 1682176,
+  "device": "NVIDIA GeForce RTX 5070",
+  "precision": "FP16 with FFN FP8 temporary transfer",
+  "seed": 42,
+  "threads": 2,
+  "sequence_length": 128,
+  "effective_batch": 8,
+  "warmup_forwards": 1,
+  "measured_forwards": 3,
+  "results": {
+    "microbatch_major": {
+      "median_forward_seconds": 2.218940646000192,
+      "trials": [
+        2.1764600540000174,
+        2.2261303430004773,
+        2.218940646000192
+      ],
+      "transfer_bytes": {
+        "h2d_weights": 62158848,
+        "d2h_gradients": 0
+      },
+      "phase_seconds": {
+        "canonical_read_and_cast_wall": 0.16175743100939144,
+        "transfer_prepare_and_schedule_wall": 0.10522552100792382,
+        "fp8_pack_cpu_wall": 0.041380956991815765
+      }
+    },
+    "layer_major": {
+      "median_forward_seconds": 2.1238218779999443,
+      "trials": [
+        2.1238218779999443,
+        2.1333452580001904,
+        2.1096159890003037
+      ],
+      "transfer_bytes": {
+        "h2d_weights": 7769856,
+        "d2h_gradients": 0
+      },
+      "phase_seconds": {
+        "canonical_read_and_cast_wall": 0.020908315998894977,
+        "transfer_prepare_and_schedule_wall": 0.013721905001148116,
+        "fp8_pack_cpu_wall": 0.005497139001818141,
+        "forward_compute_and_boundary_copy_wall": 6.319086681999579,
+        "forward_compute_stream_elapsed": 6.306868672564624
+      }
+    },
+    "layer_major_b2": {
+      "median_forward_seconds": 1.073596121999799,
+      "trials": [
+        1.033878468999319,
+        1.073596121999799,
+        1.0823729749999984
+      ],
+      "transfer_bytes": {
+        "h2d_weights": 7769856,
+        "d2h_gradients": 0
+      },
+      "phase_seconds": {
+        "canonical_read_and_cast_wall": 0.020023514999593317,
+        "transfer_prepare_and_schedule_wall": 0.013045640998825547,
+        "fp8_pack_cpu_wall": 0.005316169997058751,
+        "forward_compute_and_boundary_copy_wall": 3.14225310400343,
+        "forward_compute_stream_elapsed": 3.1344909008480597
+      }
+    }
+  },
+  "scope": "forward only; small model, shared loaded host/GPU; not 5B throughput"
+}

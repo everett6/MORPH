@@ -1,5 +1,23 @@
 # MORPH research implementation
 
+## Native sparse MORPH-Delta
+
+The new [Delta training guide](docs/delta_training_ready.md) covers the
+**4,981,264,481-parameter** sparse SSM/proof model, differentiable session memory,
+versioned graph caches, conditional FP32 AdamW, CPU/CUDA ping-pong prefetch, and
+bounded Hugging Face math streaming without a local dataset cache.
+
+```bash
+python -m streamtrain.delta_cycle --preflight
+python -m streamtrain.delta_cycle --target-tokens 1000000000
+```
+
+The selected run uses FP16 computation/exports and FP32 masters/moments. The
+Delta FP8 accuracy gate failed, so FP8 is disabled. Full-model preflight checks
+RAM, VRAM, state/journal space and replacement exports before allocation.
+
+## Dense reference
+
 Executable native causal selective-SSM/SwiGLU model with tied embeddings,
 fixed neural graph memory, four shared graph refinement iterations, and
 Dynamic Layer-Sequential Forward-Backward (DLS-FB) training. This is a tested
@@ -11,6 +29,26 @@ PyTorch's meta device without allocating model weights:
 ```bash
 python train.py --config configs/morph_7b.json --inspect --engine async --device cuda --precision bf16
 ```
+
+The [5B preset](configs/morph_5b.json) uses width 3072, 42 layers and SwiGLU
+width 6144, retaining the existing graph settings. Its LM baseline has
+**5,034,142,016 parameters** (71.97% of the 7B baseline); opt-in proof mode has
+**5,048,331,103 parameters**. Canonical disk AdamW weights/moments need
+**60,409,704,192 bytes (56.26 GiB)** for LM or **60,579,973,236 bytes
+(56.42 GiB)** for proof mode, before journals, activations and reserve.
+The dense model completed one 1,024-token calibration update. Its old FP32
+training state was retired with user approval; its verified FP16 export remains.
+For a fixed token budget, parameter-based compute is approximately 28% lower;
+actual wall time depends on replay, disk/PCIe traffic and kernel efficiency.
+Parameter count alone does not determine the training token budget.
+
+```bash
+python train.py --config configs/morph_5b.json --inspect --engine disk
+python train.py --config configs/morph_5b.json --proof-traces docs/proof_examples.jsonl --inspect --engine disk
+```
+
+[Local 5B math training cycle](docs/math_training_cycle.md) documents the
+historical dense calibration. Use the Delta guide above for the new streamed run.
 
 ## Train within the current RAM limit
 
@@ -123,22 +161,28 @@ nonfinite optimizer rejection, and exact checkpoint/resume with accumulation.
 ## Architectural scope and roadmap
 
 The SSM now defaults to a bounded chunk-parallel affine scan with a scalar
-reference and forward/backward equivalence checks. It is not a fused Mamba-2
-kernel or compatible pretrained checkpoint implementation; causal convolution
+reference and forward/backward equivalence checks. An opt-in fused Triton scan
+has tested CUDA forward/backward kernels; this is not a fused Mamba-2 kernel or compatible pretrained checkpoint implementation; causal convolution
 is not implemented.
 
 The causal language-model baseline retains neural ring memory. Opt-in
 `proof_enabled` adds typed symbolic graph inputs, external deterministic graph
 actions/replay, a separate shared post-backbone reasoning core, action-conditioned
 node selection, dependency/value heads, and joint teacher-forced losses.
-Structured proof training currently requires resident FP32 execution; streaming
-rejects that mode rather than omit its parameters.
+Structured proof training supports resident, synchronous DLS, asynchronous double
+buffers, and recoverable disk AdamW, including all joint losses and tied weights.
+Ordered statement/formal/assumption encoding and graph-only token conditioning
+preserve causality. Model-generated JSON payloads drive learned action/target
+rollouts, with real isolated Lean receipts required for certification.
 
 [The audit implementation guide](docs/audit_implementation.md) contains commands,
-actual 100M CPU timing evidence, typed proof/data/Lean interfaces, transactional
+actual 100M CPU/GPU timing evidence, typed proof/data/Lean interfaces, transactional
 disk recovery, and remaining empirical gates. Real Lean integration is skipped
-when Lean is absent. No verified proof success, architectural superiority, or
-validated full 7B/15B training throughput is claimed.
+when Lean is absent. Local isolated Lean verified tiny supervised toy rollouts;
+this does not establish held-out mathematical generalization, autonomous repair
+success, architectural superiority, or full 7B/15B throughput.
+See [the second audit integration](docs/proof_streaming_integration.md) for
+reproducible toolchain, streaming proof training, and own-goal inference commands.
 
 Muon follows the algorithm in the author's [primary implementation](https://github.com/KellerJordan/Muon/blob/master/muon.py),
 using FP32 Newton-Schulz iterations as a reproducible CPU baseline instead of

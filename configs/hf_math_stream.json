@@ -1,0 +1,16 @@
+{
+  "repo": "open-web-math/open-web-math",
+  "config": "default",
+  "split": "train",
+  "text_field": "text",
+  "revision": "fde8ef8de2300f5e778f56261843dab89f230815",
+  "start_cursor": 0,
+  "page_size": 1,
+  "max_buffer_bytes": 4194304,
+  "max_response_bytes": 8388608,
+  "max_pending_bytes": 16777216,
+  "retries": 3,
+  "timeout": 20.0,
+  "retry_backoff": 0.25,
+  "record_separator": "\n"
+}

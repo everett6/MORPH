@@ -1,0 +1,75 @@
+{
+  "training_engine": "disk",
+  "training_steps": 400,
+  "initial_loss": 10.991318702697754,
+  "final_loss": 0.005705808289349079,
+  "elapsed_seconds": 183.5846392550011,
+  "search": {
+    "success": true,
+    "events": [
+      {
+        "attempt": 0,
+        "decoded": {
+          "valid": true,
+          "payload": {
+            "proof": "by simp"
+          },
+          "raw": "{\"proof\": \"by simp\"}",
+          "model_generated": true,
+          "generated_tokens": 20
+        },
+        "decode_seconds": 0.09703761599666905,
+        "diagnostics_context": "",
+        "prompt_graph": {
+          "nodes": [
+            {
+              "node_id": 0,
+              "statement": "True ∧ True",
+              "node_type": 0,
+              "status": 0,
+              "formal_statement": "True ∧ True",
+              "assumptions": [],
+              "provenance": {},
+              "proof_hash": null
+            }
+          ],
+          "edges": [],
+          "stopped": false
+        },
+        "compiler_seconds": 0.7500307820009766,
+        "verification": {
+          "success": true,
+          "statement": "True ∧ True",
+          "assumptions": [],
+          "proof_hash": "c29fdc3bcfc50584bd161552ef706d439acbe7ae3df8be0ba15ad281cd300574",
+          "checker": "lean4",
+          "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)",
+          "diagnostics": "'morph_candidate' depends on axioms: [propext]\n",
+          "isolated": true,
+          "project_revision": "c44e0c8ee63ca166450922a373c7409c5d26b00b"
+        }
+      }
+    ],
+    "graph": {
+      "nodes": [
+        {
+          "node_id": 0,
+          "statement": "True ∧ True",
+          "node_type": 0,
+          "status": 2,
+          "formal_statement": "True ∧ True",
+          "assumptions": [],
+          "provenance": {
+            "checker": "lean4",
+            "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)"
+          },
+          "proof_hash": "c29fdc3bcfc50584bd161552ef706d439acbe7ae3df8be0ba15ad281cd300574"
+        }
+      ],
+      "edges": [],
+      "stopped": false
+    },
+    "action_policy": "fixed VERIFY schedule"
+  },
+  "claims": "small supervised fixture, bounded disk inference, no payload fallback"
+}

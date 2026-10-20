@@ -88,3 +88,17 @@ def test_bf16_cached_state_is_reusable():
         full = model(ids)
         first = model(ids[:, :2]); last = model(ids[:, 2:], first.states)
     torch.testing.assert_close(full.logits, torch.cat((first.logits, last.logits), 1), rtol=.02, atol=.002)
+
+
+def test_5b_preset_meta_counts_and_disk_state():
+    from dataclasses import replace
+    cfg=MorphConfig.from_file('configs/morph_5b.json')
+    assert (cfg.d_model,cfg.num_layers,cfg.d_ff)==(3072,42,6144)
+    for proof,expected,state_bytes in [(False,5_034_142_016,60_409_704_192),
+                                       (True,5_048_331_103,60_579_973_236)]:
+        with torch.device('meta'):
+            model=MorphModel(replace(cfg,proof_enabled=proof))
+        assert all(parameter.is_meta for parameter in model.parameters())
+        count=sum(parameter.numel() for parameter in model.parameters())
+        assert count==expected and count*12==state_bytes
+        assert abs(count/5_000_000_000-1)<.01

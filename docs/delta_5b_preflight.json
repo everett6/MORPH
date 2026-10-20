@@ -1,0 +1,27 @@
+{
+  "ready": true,
+  "blockers": [],
+  "parameters": 4981264481,
+  "expert_parameters": 4681334784,
+  "budget": {
+    "parameters": 4981264481,
+    "state_disk_bytes": 59775173772,
+    "disk_reserve_bytes": 9162549248,
+    "estimated_host_bytes": 9067683840,
+    "estimated_cuda_bytes": 7653139456,
+    "boundary_bytes": 2044723200,
+    "largest_stage_parameters": 73145856
+  },
+  "required_free_disk_bytes": 88862780944,
+  "available_disk_bytes": 94110674944,
+  "available_ram_bytes": 24421687296,
+  "available_cuda_bytes": 11366760448,
+  "source_fingerprint": "6d00c6e3f7a2d23dfb4249bdde3e3fa720b9c772ec63fb947e7053387890f889",
+  "dataset_revision": "fde8ef8de2300f5e778f56261843dab89f230815",
+  "dataset_cache_bytes": 0,
+  "precision": "fp16",
+  "optimizer": "FP32 conditional AdamW",
+  "batch_size": 4,
+  "sequence_length": 128,
+  "accumulation": 8
+}

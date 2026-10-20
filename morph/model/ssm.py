@@ -77,7 +77,11 @@ class SelectiveSSM(nn.Module):
         elif state.shape != expected or state.device != u.device or state.dtype != u.dtype:
             raise ValueError('SSM state shape, device, and dtype must match its input')
         arguments = (u, dt, -self.a_log.to(u.dtype).exp(), b, c, state)
-        y, state = (chunked_scan(*arguments, self.chunk_size) if self.backend == 'parallel'
-                    else selective_scan(*arguments))
+        if self.backend=='triton' and u.is_cuda:
+            from .triton_scan import triton_scan
+            y,state=triton_scan(*arguments,self.chunk_size)
+        elif self.backend in ('parallel','triton'):
+            y,state=chunked_scan(*arguments,self.chunk_size)
+        else:y,state=selective_scan(*arguments)
         y = y + u * self.skip[None, None, :, None]
         return self.out_proj(y.flatten(-2) * F.silu(gate)), state

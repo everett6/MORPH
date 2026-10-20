@@ -1,0 +1,61 @@
+{
+  "parameters": 5034142016,
+  "processed_target_tokens": 1024,
+  "target_tokens": 1000000000,
+  "completed_optimizer_steps": 1,
+  "precision": "FP16 compute/export, FP32 canonical weights/moments/gradient accumulation, FFN-only block-scaled FP8 temporary transfer",
+  "baseline_execution": {
+    "forward_order": "microbatch_major",
+    "batch_size": 1,
+    "accumulation": 8,
+    "sequence_length": 128,
+    "backend": "triton"
+  },
+  "metrics": {
+    "step": 1,
+    "processed_target_tokens": 1024,
+    "step_target_tokens": 1024,
+    "loss": 11.649592638015747,
+    "grad_norm": 708.1642265568191,
+    "step_seconds": 915.5196444920002,
+    "tokens_per_second": 1.1184783867283334,
+    "target_tokens": 1000000000,
+    "process_io_bytes": {
+      "read_bytes": 127688679424,
+      "write_bytes": 156649181184
+    },
+    "logical_state_and_journal_bytes": 120819408384,
+    "transfer_bytes": {
+      "h2d_weights": 78077982976,
+      "d2h_gradients": 335069990912
+    },
+    "unix": 1792465401.8006113,
+    "parameters": 5034142016,
+    "loss_scale": 128.0,
+    "peak_cuda_allocated_bytes": 3781831168,
+    "peak_rss_bytes": 6089736192
+  },
+  "export": {
+    "path": "/home/everett/MORPH/runs/morph5b-math-stage-a/fp16-step-000000001",
+    "shards": 544,
+    "weight_bytes": 10068284032,
+    "weight_GiB": 9.37682020664215,
+    "manifest_sha256": "1cf2c88eba171b5ecf281934cc84d3f34268a5d59f4861456959e27232179083",
+    "all_shard_hashes_verified": true
+  },
+  "safe_to_resume": false,
+  "currently_running": false,
+  "optimized_5b_step_run": false,
+  "projected_seconds_at_single_step_rate": 894071813.8730466,
+  "projected_physical_write_bytes_at_single_step_rate": 1.52977716e+17,
+  "qualification": "one shared-host calibration step; projections are arithmetic, not sustained throughput/endurance guarantees",
+  "remaining_bottlenecks": [
+    "synchronous CPU preparation",
+    "Python/kernel submission and synchronization",
+    "repeated tied-gradient cursor serialization",
+    "disk state/journal traffic"
+  ],
+  "safe_to_resume_at_measurement": true,
+  "canonical_state_retired": true,
+  "retirement_receipt": "runs/morph5b-math-stage-a/retired-state.json"
+}

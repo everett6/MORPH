@@ -1,0 +1,53 @@
+{
+  "metadata": {
+    "steps": 5,
+    "sequence_length": 32,
+    "batch_size": 1,
+    "accumulation": 1,
+    "precision": "fp32",
+    "seed": 42,
+    "threads": 2,
+    "torch_version": "2.14.0+cu130",
+    "cpu_model": "AMD Ryzen 9 7950X 16-Core Processor"
+  },
+  "parameters": 102402048,
+  "config": {
+    "vocab_size": 256,
+    "d_model": 512,
+    "num_layers": 32,
+    "d_ff": 1024,
+    "expand": 2,
+    "d_state": 16,
+    "head_dim": 64,
+    "ssm_backend": "parallel",
+    "scan_chunk_size": 16,
+    "proof_enabled": false,
+    "statement_field_length": 128,
+    "graph_enabled": false,
+    "graph_update": true,
+    "graph_interval": 4,
+    "d_graph": 128,
+    "graph_nodes": 16,
+    "reasoning_steps": 4,
+    "norm_eps": 1e-06
+  },
+  "device": "cuda",
+  "engine": "async",
+  "ablation": "ssm",
+  "measured": true,
+  "verified_proof_success": null,
+  "qualification": {
+    "estimated_host_bytes": 3936474048,
+    "estimated_cuda_bytes": 362177664
+  },
+  "metrics": {
+    "elapsed_seconds": 2.609177717997227,
+    "tokens_per_second": 61.32200152422506,
+    "peak_cuda_allocated_bytes": 134456320,
+    "transfer_bytes": {
+      "h2d_weights": 4098693120,
+      "d2h_gradients": 2050662400
+    },
+    "peak_rss_bytes": 3631247360
+  }
+}

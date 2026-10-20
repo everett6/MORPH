@@ -6,16 +6,20 @@ This does not establish that MORPH outperforms an SSM, proves new theorems, or t
 productively at 7B/15B. Existing 7B parameter count is unchanged unless the
 new proof mode is explicitly enabled.
 
+The second audit integration supersedes historical limitations below: see
+[proof streaming integration](proof_streaming_integration.md) for current
+proof streaming, real Lean/data collection and CUDA measurements.
+
 ## Implementation status
 
 | Audit item | Code delivered | Evidence and remaining gate |
 |---|---|---|
-| 100M performance benchmark | Resource-qualified scaling/component harness | CPU measurements below; occupied GPU safely skipped |
-| Python SSM bottleneck | Stable parallel affine scan inside bounded chunks; scalar reference retained | Forward/all-input/state gradients at multiple chunk boundaries; not a fused CUDA kernel |
+| 100M performance benchmark | Resource-qualified scaling/component harness | CPU measurements below; initial CPU runs; later stage-qualified GPU runs in integration guide |
+| Python SSM bottleneck | Stable parallel affine scan inside bounded chunks; scalar reference retained | Forward/all-input/state gradients at multiple chunk boundaries; later optional fused Triton implementation in integration guide |
 | Symbolic proof state | Typed nodes, independent status, exact assumptions/provenance, directed hyperedges | Metadata/tensor integration tests; status never inferred from confidence |
 | Dynamic actions | External create/connect/decompose/revise/prune/verify requests, masks, hash-checked replay | Invalid action-target pairs and stale dependency revisions rejected |
 | Separate reasoning core | Opt-in shared post-backbone refinement, action-conditioned targets, value and dependency heads | Joint losses train backbone and every refinement iteration |
-| Math/Lean pipeline | Fixed versioned UTF-8 byte tokenizer, streamed JSONL compiler, mmap theorem records, family-held-out splits, real Lean client | Synthetic fixture pipeline works; Lean/Mathlib not installed, real integration test skipped |
+| Math/Lean pipeline | Fixed versioned UTF-8 byte tokenizer, streamed JSONL compiler, mmap theorem records, family-held-out splits, real Lean client | Synthetic fixture pipeline works; local pinned Lean/Mathlib now installed and real integration checks pass |
 | Recoverable disk updates | Durable one-stage undo journal plus saved boundaries/cotangents/tied-gradient cursor | Six interruption boundaries recover exact weight/m/v and a subsequent step |
 | Graph-aware objectives | Token + typed dependency + action + target + value teacher-forced loss | Structured resident CLI trained/evaluated on fixture traces |
 | Ablations | SSM, frozen neural graph, recurrent graph component/LM timing switches | Timing harness only; no matched-compute mathematical-quality conclusion |
@@ -101,7 +105,7 @@ was claimed in this environment.
 The symbolic controller's VERIFY action requests checking; only a matching
 external checker receipt can promote a node to VERIFIED. Restoring verified
 nodes also requires explicit checker evidence. Rollouts use joint action/target
-masks and caller-provided payloads; no arbitrary topology mutation is treated
+masks and optional caller payloads or model-generated JSON; no arbitrary topology mutation is treated
 as differentiable. A verifier receipt should be applied through
 `ProofGraph.accept_verification`, not by editing status labels.
 
@@ -122,5 +126,5 @@ loss/file corruption outside the tested fsync protocol and arbitrary external
 file edits are not claimed recoverable.
 
 GitHub CPU CI runs correctness and structured train/evaluate smoke commands.
-CUDA and real Lean integration tests explicitly skip when unavailable. A real
-GPU runner and Lean/Mathlib environment still need external provisioning.
+CUDA and real Lean integration tests explicitly skip when unavailable. Hosted CI has no GPU or Lean; local GPU and pinned rootless Lean checks are
+reported separately.

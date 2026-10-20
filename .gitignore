@@ -26,3 +26,5 @@ runs/
 journal/
 cursor-*.pt
 transaction-input.pt
+.tools/
+.generated/

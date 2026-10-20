@@ -19,13 +19,42 @@ class Stage(nn.Module):
         if embedding is not None:
             self.weight = embedding.weight
 
-    def forward(self, x, graph=None):
+    def forward(self, x, graph=None, proof_graph=None):
+        if self.kind == 'proof':
+            return self.module(x,graph,proof_graph)
         if self.kind == 'embedding':
             return self.module(x), None
         if self.kind == 'block':
             x, _, graph = self.module(x, graph_memory=graph, return_graph=True)
             return x, graph
         return F.linear(self.module(x), self.weight)
+
+
+def make_stages(model):
+    if hasattr(model,'stream_stages'):
+        return list(model.stream_stages())
+    stages=[Stage(model.embedding,'embedding')]
+    stages += [Stage(block,'block') for block in model.blocks]
+    stages += [Stage(model.proof_head,'proof') if model.config.proof_enabled else Stage(model.norm,'head',model.embedding)]
+    return stages
+
+
+def unpack_batch(batch,device):
+    if isinstance(batch,dict):
+        return batch['tokens'],{key:value.to(device) for key,value in batch['graph'].items()}
+    return batch,None
+
+
+def stage_loss(output,batch,device):
+    if isinstance(batch,dict):
+        from morph.training.proof import joint_loss
+        tokens=batch['tokens'].to(device)
+        graph={key:value.to(device) for key,value in batch['graph'].items()}
+        return joint_loss(output,tokens,graph,batch['actions'].to(device),batch['targets'].to(device),
+                          batch['values'].to(device),batch.get('weights'))[0]+output.get('router_aux_loss',0.)
+    logits=output['lm_logits'] if isinstance(output,dict) else output
+    auxiliary=output.get('router_aux_loss',0.) if isinstance(output,dict) else 0.
+    return F.cross_entropy(logits.float().flatten(0,1),batch[:,1:].to(device).flatten())+auxiliary
 
 
 class Slot:
@@ -61,17 +90,13 @@ class Slot:
 
 class StreamTrainEngine:
     def __init__(self, model, device='cpu', async_mode=False, dtype=torch.float32):
-        if model.config.proof_enabled:
-            raise ValueError('shared proof reasoning core is not registered for streaming; use resident structured training')
         if any(p.device.type != 'cpu' for p in model.parameters()):
             raise ValueError('streaming requires CPU master parameters')
         self.model, self.device, self.dtype = model, torch.device(device), dtype
         self.async_mode = async_mode
         if async_mode and self.device.type != 'cuda':
             raise ValueError('async mode requires CUDA')
-        self.stages = [Stage(model.embedding, 'embedding')]
-        self.stages += [Stage(block, 'block') for block in model.blocks]
-        self.stages += [Stage(model.norm, 'head', model.embedding)]
+        self.stages=make_stages(model)
         self.specs = [list(stage.named_parameters()) for stage in self.stages]
         size = max(sum(p.numel() for _, p in spec) for spec in self.specs)
         self.slots = [Slot(size, self.device, dtype, async_mode) for _ in range(2)]
@@ -137,17 +162,22 @@ class StreamTrainEngine:
         slot.status = 'EVACUATING'
         self.transfer_bytes['d2h_gradients'] += offset * 4
 
-    def backward(self, tokens, scale=1.0):
+    def backward(self, tokens, scale=1.0, loss_scale=1.0):
         """Accumulate both token and graph cotangents through exact replay."""
         inputs = []
-        state = (tokens[:, :-1].to(self.device), None)
+        batch=tokens
+        if self.model.config.proof_enabled and not isinstance(batch,dict):
+            raise ValueError('proof model requires a structured batch with joint supervision')
+        tokens,proof_graph=unpack_batch(batch,self.device)
+        # Structured token loss performs its own shift on complete prompt logits.
+        state = (tokens.to(self.device) if proof_graph is not None else tokens[:, :-1].to(self.device), None)
         self.load(0, self.slots[0])
         for index in range(len(self.stages) - 1):
             slot = self.slots[index % 2]
             inputs.append(tuple(v.detach().cpu() if v is not None else None for v in state))
             self.load(index + 1, self.slots[(index + 1) % 2])
             params = self.parameters(index, slot, False)
-            with torch.no_grad(), torch.autocast(self.device.type, dtype=self.dtype, enabled=self.dtype == torch.bfloat16):
+            with torch.no_grad(), torch.autocast(self.device.type, dtype=self.dtype, enabled=self.dtype in (torch.bfloat16,torch.float16)):
                 state = functional_call(self.stages[index], params, state)
             self.release(slot)
         inputs.append(tuple(v.detach().cpu() if v is not None else None for v in state))
@@ -163,18 +193,18 @@ class StreamTrainEngine:
             state_values = [v for v in state if v is not None] if index else []
             parameters = [params[name] for name, _ in self.specs[index]]
             values = state_values + parameters
-            with torch.enable_grad(), torch.autocast(self.device.type, dtype=self.dtype, enabled=self.dtype == torch.bfloat16):
-                output = functional_call(self.stages[index], params, state)
+            with torch.enable_grad(), torch.autocast(self.device.type, dtype=self.dtype, enabled=self.dtype in (torch.bfloat16,torch.float16)):
+                output = functional_call(self.stages[index], params, (*state,proof_graph))
                 if cotangents is None:
-                    loss = F.cross_entropy(output.float().flatten(0, 1), tokens[:, 1:].to(self.device).flatten())
+                    loss = stage_loss(output,batch,self.device)
                     loss_value = loss.detach().item()
-                    grads = torch.autograd.grad(loss * scale, values, allow_unused=True)
+                    grads = torch.autograd.grad(loss * scale * loss_scale, values, allow_unused=True)
                 else:
                     outputs = [v for v in output if v is not None]
                     grads = torch.autograd.grad(outputs, values, cotangents, allow_unused=True)
             grads = [torch.zeros_like(v) if g is None else g for v, g in zip(values, grads)]
             cotangents = grads[:len(state_values)] if index else None
-            self.evacuate(index, slot, grads[len(state_values):])
+            self.evacuate(index, slot, [g.float()/loss_scale for g in grads[len(state_values):]])
             del params, output, grads, parameters, values, state_values
         for slot in self.slots:
             slot.flush()

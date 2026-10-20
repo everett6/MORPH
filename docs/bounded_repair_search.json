@@ -1,0 +1,334 @@
+{
+  "goals": [
+    {
+      "statement": "∀ n : Nat, n ≤ n + 1",
+      "success": true,
+      "events": [
+        {
+          "attempt": 0,
+          "decoded": {
+            "valid": true,
+            "payload": {
+              "proof": "by simp"
+            },
+            "raw": "{\"proof\": \"by simp\"}",
+            "model_generated": true
+          },
+          "verification": {
+            "success": true,
+            "statement": "∀ n : Nat, n ≤ n + 1",
+            "assumptions": [],
+            "proof_hash": "ee4f34d9b46f8ecf4a64396a1a440f4ef781af86511270dcbff7b2a7a5d8a6fb",
+            "checker": "lean4",
+            "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)",
+            "diagnostics": "'morph_candidate' depends on axioms: [propext, Quot.sound]\n",
+            "isolated": true,
+            "project_revision": "c44e0c8ee63ca166450922a373c7409c5d26b00b"
+          }
+        }
+      ],
+      "graph": {
+        "nodes": [
+          {
+            "node_id": 0,
+            "statement": "∀ n : Nat, n ≤ n + 1",
+            "node_type": 0,
+            "status": 2,
+            "formal_statement": "∀ n : Nat, n ≤ n + 1",
+            "assumptions": [],
+            "provenance": {
+              "checker": "lean4",
+              "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)"
+            },
+            "proof_hash": "ee4f34d9b46f8ecf4a64396a1a440f4ef781af86511270dcbff7b2a7a5d8a6fb"
+          }
+        ],
+        "edges": [],
+        "stopped": false
+      },
+      "action_policy": "fixed VERIFY schedule"
+    },
+    {
+      "statement": "∀ n m : Nat, n ≤ n + m",
+      "success": true,
+      "events": [
+        {
+          "attempt": 0,
+          "decoded": {
+            "valid": true,
+            "payload": {
+              "proof": "by simp"
+            },
+            "raw": "{\"proof\": \"by simp\"}",
+            "model_generated": true
+          },
+          "verification": {
+            "success": true,
+            "statement": "∀ n m : Nat, n ≤ n + m",
+            "assumptions": [],
+            "proof_hash": "8fc486dc166e4b3d3eda6e6b17ec19144d76b47f2be7b74534db5e001c5037c2",
+            "checker": "lean4",
+            "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)",
+            "diagnostics": "'morph_candidate' depends on axioms: [propext, Quot.sound]\n",
+            "isolated": true,
+            "project_revision": "c44e0c8ee63ca166450922a373c7409c5d26b00b"
+          }
+        }
+      ],
+      "graph": {
+        "nodes": [
+          {
+            "node_id": 0,
+            "statement": "∀ n m : Nat, n ≤ n + m",
+            "node_type": 0,
+            "status": 2,
+            "formal_statement": "∀ n m : Nat, n ≤ n + m",
+            "assumptions": [],
+            "provenance": {
+              "checker": "lean4",
+              "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)"
+            },
+            "proof_hash": "8fc486dc166e4b3d3eda6e6b17ec19144d76b47f2be7b74534db5e001c5037c2"
+          }
+        ],
+        "edges": [],
+        "stopped": false
+      },
+      "action_policy": "fixed VERIFY schedule"
+    },
+    {
+      "statement": "∀ a b c : Nat, a + b + c = c + b + a",
+      "success": false,
+      "events": [
+        {
+          "attempt": 0,
+          "decoded": {
+            "valid": true,
+            "payload": {
+              "proof": "by simp"
+            },
+            "raw": "{\"proof\": \"by simp\"}",
+            "model_generated": true
+          },
+          "verification": {
+            "success": false,
+            "statement": "∀ a b c : Nat, a + b + c = c + b + a",
+            "assumptions": [],
+            "proof_hash": null,
+            "checker": "lean4",
+            "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)",
+            "diagnostics": "/tmp/morph-lean-f4ivwgqf/Candidate.lean:3:70: error: simp made no progress\n'morph_candidate' depends on axioms: [sorryAx]\n",
+            "isolated": true,
+            "project_revision": "c44e0c8ee63ca166450922a373c7409c5d26b00b"
+          }
+        },
+        {
+          "attempt": 1,
+          "decoded": {
+            "valid": true,
+            "payload": {
+              "proof": "by simp"
+            },
+            "raw": "{\"proof\": \"by simp\"}",
+            "model_generated": true
+          },
+          "verification": {
+            "success": false,
+            "statement": "∀ a b c : Nat, a + b + c = c + b + a",
+            "assumptions": [],
+            "proof_hash": null,
+            "checker": "lean4",
+            "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)",
+            "diagnostics": "/tmp/morph-lean-3n1egbit/Candidate.lean:3:70: error: simp made no progress\n'morph_candidate' depends on axioms: [sorryAx]\n",
+            "isolated": true,
+            "project_revision": "c44e0c8ee63ca166450922a373c7409c5d26b00b"
+          }
+        },
+        {
+          "attempt": 2,
+          "decoded": {
+            "valid": true,
+            "payload": {
+              "proof": "by simp"
+            },
+            "raw": "{\"proof\": \"by simp\"}",
+            "model_generated": true
+          },
+          "verification": {
+            "success": false,
+            "statement": "∀ a b c : Nat, a + b + c = c + b + a",
+            "assumptions": [],
+            "proof_hash": null,
+            "checker": "lean4",
+            "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)",
+            "diagnostics": "/tmp/morph-lean-tfp3pth6/Candidate.lean:3:70: error: simp made no progress\n'morph_candidate' depends on axioms: [sorryAx]\n",
+            "isolated": true,
+            "project_revision": "c44e0c8ee63ca166450922a373c7409c5d26b00b"
+          }
+        }
+      ],
+      "graph": {
+        "nodes": [
+          {
+            "node_id": 0,
+            "statement": "∀ a b c : Nat, a + b + c = c + b + a",
+            "node_type": 0,
+            "status": 0,
+            "formal_statement": "∀ a b c : Nat, a + b + c = c + b + a",
+            "assumptions": [],
+            "provenance": {},
+            "proof_hash": null
+          }
+        ],
+        "edges": [],
+        "stopped": false
+      },
+      "action_policy": "fixed VERIFY schedule"
+    },
+    {
+      "statement": "∀ n : Nat, n + 1 > n",
+      "success": true,
+      "events": [
+        {
+          "attempt": 0,
+          "decoded": {
+            "valid": true,
+            "payload": {
+              "proof": "by simp"
+            },
+            "raw": "{\"proof\": \"by simp\"}",
+            "model_generated": true
+          },
+          "verification": {
+            "success": true,
+            "statement": "∀ n : Nat, n + 1 > n",
+            "assumptions": [],
+            "proof_hash": "576546f18bac7c32c490f1c47a0989008ad1b1c3f7eb09fc76df2ef3316fc017",
+            "checker": "lean4",
+            "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)",
+            "diagnostics": "'morph_candidate' depends on axioms: [propext, Quot.sound]\n",
+            "isolated": true,
+            "project_revision": "c44e0c8ee63ca166450922a373c7409c5d26b00b"
+          }
+        }
+      ],
+      "graph": {
+        "nodes": [
+          {
+            "node_id": 0,
+            "statement": "∀ n : Nat, n + 1 > n",
+            "node_type": 0,
+            "status": 2,
+            "formal_statement": "∀ n : Nat, n + 1 > n",
+            "assumptions": [],
+            "provenance": {
+              "checker": "lean4",
+              "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)"
+            },
+            "proof_hash": "576546f18bac7c32c490f1c47a0989008ad1b1c3f7eb09fc76df2ef3316fc017"
+          }
+        ],
+        "edges": [],
+        "stopped": false
+      },
+      "action_policy": "fixed VERIFY schedule"
+    },
+    {
+      "statement": "∀ a b : Nat, a ≤ b → a + 1 ≤ b + 1",
+      "success": true,
+      "events": [
+        {
+          "attempt": 0,
+          "decoded": {
+            "valid": true,
+            "payload": {
+              "proof": "by simp"
+            },
+            "raw": "{\"proof\": \"by simp\"}",
+            "model_generated": true
+          },
+          "verification": {
+            "success": true,
+            "statement": "∀ a b : Nat, a ≤ b → a + 1 ≤ b + 1",
+            "assumptions": [],
+            "proof_hash": "75d6f67399042cc7c794a8c6ce5e9a99c68ee5f8daa27b4b64db5e60c077f051",
+            "checker": "lean4",
+            "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)",
+            "diagnostics": "'morph_candidate' depends on axioms: [propext, Quot.sound]\n",
+            "isolated": true,
+            "project_revision": "c44e0c8ee63ca166450922a373c7409c5d26b00b"
+          }
+        }
+      ],
+      "graph": {
+        "nodes": [
+          {
+            "node_id": 0,
+            "statement": "∀ a b : Nat, a ≤ b → a + 1 ≤ b + 1",
+            "node_type": 0,
+            "status": 2,
+            "formal_statement": "∀ a b : Nat, a ≤ b → a + 1 ≤ b + 1",
+            "assumptions": [],
+            "provenance": {
+              "checker": "lean4",
+              "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)"
+            },
+            "proof_hash": "75d6f67399042cc7c794a8c6ce5e9a99c68ee5f8daa27b4b64db5e60c077f051"
+          }
+        ],
+        "edges": [],
+        "stopped": false
+      },
+      "action_policy": "fixed VERIFY schedule"
+    },
+    {
+      "statement": "∀ n m : Nat, n = m → m = n",
+      "success": true,
+      "events": [
+        {
+          "attempt": 0,
+          "decoded": {
+            "valid": true,
+            "payload": {
+              "proof": "by intro n m; omega"
+            },
+            "raw": "{\"proof\": \"by intro n m; omega\"}",
+            "model_generated": true
+          },
+          "verification": {
+            "success": true,
+            "statement": "∀ n m : Nat, n = m → m = n",
+            "assumptions": [],
+            "proof_hash": "b71ff580d0781712e7e0f86c167fbb082cc476bd6a322e57fcd6487e501073be",
+            "checker": "lean4",
+            "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)",
+            "diagnostics": "'morph_candidate' depends on axioms: [propext, Quot.sound]\n",
+            "isolated": true,
+            "project_revision": "c44e0c8ee63ca166450922a373c7409c5d26b00b"
+          }
+        }
+      ],
+      "graph": {
+        "nodes": [
+          {
+            "node_id": 0,
+            "statement": "∀ n m : Nat, n = m → m = n",
+            "node_type": 0,
+            "status": 2,
+            "formal_statement": "∀ n m : Nat, n = m → m = n",
+            "assumptions": [],
+            "provenance": {
+              "checker": "lean4",
+              "version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)"
+            },
+            "proof_hash": "b71ff580d0781712e7e0f86c167fbb082cc476bd6a322e57fcd6487e501073be"
+          }
+        ],
+        "edges": [],
+        "stopped": false
+      },
+      "action_policy": "fixed VERIFY schedule"
+    }
+  ],
+  "selection": "six prelisted simple Nat goals; fixed model; no candidate/diagnostic substitutions"
+}

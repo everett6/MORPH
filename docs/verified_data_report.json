@@ -1,0 +1,41 @@
+{
+  "accepted": 1000,
+  "rejected": 205,
+  "trace_kind": "declaration_reference",
+  "split_counts": {
+    "train": 813,
+    "validation": 94,
+    "test": 93
+  },
+  "mathlib_revision": "c44e0c8ee63ca166450922a373c7409c5d26b00b",
+  "lean_version": "Lean (version 4.19.0, x86_64-unknown-linux-gnu, commit 6caaee842e94, Release)",
+  "isolated": true,
+  "dataset_sha256": "02f2f927641e448c0d6ee7606218286b1acaab527c3a0af4e51faf67928ae3aa",
+  "alias_policy": "exact whitespace-normalized type hash; not semantic equivalence",
+  "verified_new_theorems": false,
+  "lean_dojo_multistep": false,
+  "rejection_examples": [
+    {
+      "name": "BitVec.slt_eq_not_ult_of_msb_neq.omega_1",
+      "diagnostics": "Candidate.lean:4:101: error: type mismatch\n  @BitVec.slt_eq_not_ult_of_msb_neq.omega_1\nhas type\n  ∀ {w : ℕ} {x y : BitVec w}, ¬↑x.toNat - ↑(2 ^ w) < ↑y.toNat → False : Prop\nbut is expected to have type\n  ∀ {w : ℕ} {x y : BitVec w}, ¬x.toNat - 2 ^ w < y.toNat → False : Prop\n'morph_candidate' depends on axioms: [sorryAx]\n"
+    },
+    {
+      "name": "Fin.mk_uInt16ToNat",
+      "diagnostics": "Candidate.lean:4:53: warning: The '⋯' token is used by the pretty printer to indicate omitted terms, and it should not be used directly. It logs this warning and then elaborates like '_'.\n\nThe presence of '⋯' in pretty printing output is controlled by the 'pp.maxSteps', 'pp.deepTerms' and 'pp.proofs' options. These options can be further adjusted using 'pp.deepTerms.threshold' and 'pp.proofs.threshold'. If this '⋯' was copied from the Infoview, the hover there for the original '⋯' explains which of these options led to the omission.\nCandidate.lean:4:53: error: don't know how to synthesize placeholder for argument 'isLt'\ncontext:\nn : UInt16\n⊢ n.toNat < UInt16.size\nwhen the resulting type of a declaration is explicitly provided, all holes (e.g., `_`) in the header are resolved before the declaration body is processed\n'morph_candidate' does not depend on any axioms\n"
+    },
+    {
+      "name": "BitVec.or_eq_zero_iff",
+      "diagnostics": "forbidden declaration or trust bypass"
+    },
+    {
+      "name": "BitVec.setWidth_setWidth_succ_eq_setWidth_setWidth_add_twoPow._auxLemma.2",
+      "diagnostics": "Candidate.lean:4:99: error: invalid field notation, type is not of the form (C ...) where C is a constant\n  BitVec.setWidth_setWidth_succ_eq_setWidth_setWidth_add_twoPow\nhas type\n  ∀ (x : BitVec ?m.23) (i : ℕ),\n    BitVec.setWidth ?m.23 (BitVec.setWidth (i + 1) x) =\n      BitVec.setWidth ?m.23 (BitVec.setWidth i x) + (x &&& BitVec.twoPow ?m.23 i)\n'morph_candidate' depends on axioms: [sorryAx]\n"
+    },
+    {
+      "name": "Fin.mk_le_of_le_val",
+      "diagnostics": "Candidate.lean:4:75: warning: The '⋯' token is used by the pretty printer to indicate omitted terms, and it should not be used directly. It logs this warning and then elaborates like '_'.\n\nThe presence of '⋯' in pretty printing output is controlled by the 'pp.maxSteps', 'pp.deepTerms' and 'pp.proofs' options. These options can be further adjusted using 'pp.deepTerms.threshold' and 'pp.proofs.threshold'. If this '⋯' was copied from the Infoview, the hover there for the original '⋯' explains which of these options led to the omission.\nCandidate.lean:4:75: error: don't know how to synthesize placeholder for argument 'isLt'\ncontext:\nn : ℕ\nb : Fin n\na : ℕ\nh : a ≤ ↑b\n⊢ a < n\nwhen the resulting type of a declaration is explicitly provided, all holes (e.g., `_`) in the header are resolved before the declaration body is processed\n'morph_candidate' does not depend on any axioms\n"
+    }
+  ],
+  "diagnostics_canonicalized_records": 45,
+  "diagnostics_policy": "temporary source paths replaced by Candidate.lean; checked statements/proofs/receipt outcomes unchanged"
+}

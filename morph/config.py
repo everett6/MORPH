@@ -16,6 +16,7 @@ class MorphConfig:
     ssm_backend: str = 'parallel'
     scan_chunk_size: int = 32
     proof_enabled: bool = False
+    statement_field_length: int = 128
     graph_enabled: bool = False
     graph_update: bool = True
     graph_interval: int = 4
@@ -28,7 +29,7 @@ class MorphConfig:
         for key, value in asdict(self).items():
             if key not in ('norm_eps', 'graph_enabled', 'proof_enabled', 'ssm_backend', 'graph_update') and (type(value) is not int or value <= 0):
                 raise ValueError(f'{key} must be a positive integer')
-        if self.ssm_backend not in ('reference', 'parallel'):
+        if self.ssm_backend not in ('reference', 'parallel', 'triton'):
             raise ValueError('unsupported SSM backend')
         if self.d_model * self.expand % self.head_dim:
             raise ValueError('expanded width must be divisible by head_dim')

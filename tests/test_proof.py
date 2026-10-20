@@ -68,17 +68,20 @@ def test_teacher_pair_masks_and_untrusted_restore():
     output=model.forward_proof(tokens,tensors)
     with pytest.raises(ValueError,match='inactive'):
         joint_loss(output,tokens,tensors,torch.tensor([ActionType.VERIFY]),torch.tensor([1]),torch.tensor([0.]))
+    graph.nodes[0].node_type=NodeType.CONJECTURE
     with pytest.raises(ValueError,match='dependencies'):
         apply_action(graph,dict(type='REVISE',target=0,statement='new statement'))
 
 
-def test_streaming_proof_core_is_explicitly_rejected(tmp_path):
+def test_streaming_proof_core_requires_structured_batch(tmp_path):
     from streamtrain import StreamTrainEngine
     cfg=MorphConfig(proof_enabled=True)
-    with pytest.raises(ValueError,match='not registered'):
-        StreamTrainEngine(MorphModel(cfg))
+    engine=StreamTrainEngine(MorphModel(cfg))
+    assert engine.stages[-1].kind=='proof'
+    with pytest.raises(ValueError,match='structured'):
+        engine.backward(torch.tensor([[1,2,3]]))
     from streamtrain.disk import disk_train
-    with pytest.raises(ValueError,match='resident structured'):
+    with pytest.raises(ValueError,match='structured proof'):
         disk_train(cfg,torch.tensor([[1,2,3]]),tmp_path/'unsupported',1)
     assert not (tmp_path/'unsupported').exists()
 
