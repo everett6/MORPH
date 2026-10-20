@@ -12,6 +12,22 @@ PyTorch's meta device without allocating model weights:
 python train.py --config configs/morph_7b.json --inspect --engine async --device cuda --precision bf16
 ```
 
+The [5B preset](configs/morph_5b.json) uses width 3072, 42 layers and SwiGLU
+width 6144, retaining the existing graph settings. Its LM baseline has
+**5,034,142,016 parameters** (71.97% of the 7B baseline); opt-in proof mode has
+**5,048,331,103 parameters**. Canonical disk AdamW weights/moments need
+**60,409,704,192 bytes (56.26 GiB)** for LM or **60,579,973,236 bytes
+(56.42 GiB)** for proof mode, before journals, activations and reserve.
+These are meta counts/resource estimates; no full 5B training was run.
+For a fixed token budget, parameter-based compute is approximately 28% lower;
+actual wall time depends on replay, disk/PCIe traffic and kernel efficiency.
+Parameter count alone does not determine the training token budget.
+
+```bash
+python train.py --config configs/morph_5b.json --inspect --engine disk
+python train.py --config configs/morph_5b.json --proof-traces docs/proof_examples.jsonl --inspect --engine disk
+```
+
 ## Train within the current RAM limit
 
 The new [two-pass disk-backed AdamW mode](docs/disk_adamw.md) moves FP32 weights
