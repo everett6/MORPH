@@ -1,0 +1,44 @@
+{
+  "config": {
+    "vocab_size": 256,
+    "d_model": 64,
+    "num_layers": 4,
+    "d_ff": 128,
+    "expand": 2,
+    "d_state": 8,
+    "head_dim": 16,
+    "ssm_backend": "parallel",
+    "scan_chunk_size": 32,
+    "proof_enabled": false,
+    "statement_field_length": 128,
+    "graph_enabled": true,
+    "graph_update": true,
+    "graph_interval": 4,
+    "d_graph": 16,
+    "graph_nodes": 4,
+    "reasoning_steps": 4,
+    "norm_eps": 1e-06
+  },
+  "device": "NVIDIA GeForce RTX 5070",
+  "seed": 42,
+  "tokens": 32,
+  "precision": "FP16 compute/FP32 canonical AdamW",
+  "fp8": "E4M3FN/256-element blocks/FP32 scales; FFN gate/up/down only",
+  "loss_fp16": 5.5754008293151855,
+  "loss_fp8": 5.574864387512207,
+  "relative_loss_drift": 9.621582723845266e-05,
+  "relative_gradient_drift": 0.01948488995158744,
+  "quantized_resident_vs_disk_gradient_relative_l2": 0.00020344646195282685,
+  "disk_loss": 5.574864387512207,
+  "transfer_bytes": {
+    "h2d_weights": 1149920,
+    "d2h_gradients": 1964160
+  },
+  "limits": {
+    "relative_loss": 0.02,
+    "relative_gradient": 0.1,
+    "execution_gradient": 0.02
+  },
+  "passed": true,
+  "claims": "small numerical acceptance gate; no convergence or throughput guarantee"
+}

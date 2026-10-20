@@ -1,0 +1,53 @@
+{
+  "model_parameters": 4981264481,
+  "target_tokens": 1000000000,
+  "process": {
+    "pid": 64808,
+    "command": [
+      "/home/everett/miniconda3/bin/python",
+      "-m",
+      "streamtrain.delta_cycle",
+      "--config",
+      "configs/morph_delta_5b.json",
+      "--source-config",
+      "configs/hf_math_stream.json",
+      "--run-dir",
+      "/home/everett/MORPH/runs/morph-delta5b-hf-math",
+      "--target-tokens",
+      "1000000000",
+      "--device",
+      "cuda",
+      "--precision",
+      "fp16",
+      "--batch-size",
+      "4",
+      "--sequence-length",
+      "128",
+      "--accumulation",
+      "8",
+      "--threads",
+      "4"
+    ],
+    "started_unix": 1792470835.8621354,
+    "target_tokens": 1000000000,
+    "automatic_step_cap": null
+  },
+  "status_at_recording": {
+    "phase": "training",
+    "pid": 64808,
+    "updated_unix": 1792471128.7930233,
+    "training_phase": "update_reverse",
+    "stage": 54,
+    "step": 0,
+    "processed_target_tokens": 0,
+    "target_tokens": 1000000000
+  },
+  "tests": {
+    "full_suite_passed": 126,
+    "additional_proof_backend_tests_passed": 6
+  },
+  "hf_data_cache": false,
+  "fp8_enabled": false,
+  "old_dense_fp16_preserved": true,
+  "run_directory": "/home/everett/MORPH/runs/morph-delta5b-hf-math"
+}

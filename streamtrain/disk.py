@@ -8,6 +8,7 @@ import json
 import math
 import os
 import shutil
+import time
 from contextlib import nullcontext
 from pathlib import Path
 import numpy as np
@@ -50,7 +51,7 @@ class DiskState:
             raise ValueError('disk state tensor schema differs')
 
     @classmethod
-    def create(cls, root, model, source=None, seed=42, chunk_elements=1048576):
+    def create(cls, root, model, source=None, seed=42, chunk_elements=1048576, progress=None):
         root = Path(root)
         root.mkdir(parents=True, exist_ok=False)
         entries = {name: dict(shape=list(p.shape), size=p.numel(), file=f'{i:05}.bin')
@@ -82,6 +83,7 @@ class DiskState:
                 mapped[1:, start:end] = 0
             mapped.flush()
             del mapped
+            if progress is not None:progress(name, sum(e['size'] for e in entries.values()), size)
         manifest['dirty'] = False
         durable_json(root / 'manifest.json', manifest)
         return cls(root, model, manifest)
@@ -92,12 +94,12 @@ class DiskState:
         manifest = json.loads((root / 'manifest.json').read_text())
         if manifest['dirty'] and not manifest.get('transaction'):
             raise RuntimeError('incomplete disk update: state is not a valid resume point; restore a backup')
-        from morph import MorphConfig
-        if MorphConfig(**manifest['config']).to_dict() != model.config.to_dict():
+        if type(model.config)(**manifest['config']).to_dict() != model.config.to_dict():
             raise ValueError('disk model config differs')
         if not manifest['dirty']:
             for path in root.glob('cursor-*.pt'):path.unlink(missing_ok=True)
             (root/'transaction-input.pt').unlink(missing_ok=True)
+            (root/'transaction-tied.pt').unlink(missing_ok=True)
             shutil.rmtree(root/'journal',ignore_errors=True)
         return cls(root, model, manifest)
 
@@ -142,18 +144,42 @@ class DiskState:
         self.manifest['transaction']['journal']=index
         durable_json(self.root/'manifest.json',self.manifest)
 
-    def commit_stage(self,index,cotangents,tied):
-        previous=self.manifest['transaction']['cursor']
-        filename=f'cursor-{index}.pt'
-        durable_torch(self.root/filename,dict(cotangents=[None if values is None else [v.detach().cpu() for v in values] for values in cotangents],
-                                             tied=None if tied is None else tied.detach().cpu()))
-        self.fault('cursor_file_durable')
+    def commit_stage(self,index,cotangents,tied,parameter_steps=None):
         transaction=self.manifest['transaction']
+        previous=transaction['cursor']
+        filename=f'cursor-{index}.pt'
+        tied_ref=None
+        if tied is not None:
+            tied_ref=transaction.get('tied_ref')
+            if tied_ref is None:
+                # Only the first committed cursor publishes this immutable
+                # payload. An orphan from an uncommitted attempt is replaced.
+                tied_ref='transaction-tied.pt'
+                durable_torch(self.root/tied_ref,tied.detach().cpu())
+                self.fault('tied_file_durable')
+        payload=dict(cotangents=[None if values is None else [v.detach().cpu() for v in values] for values in cotangents],
+                     tied=None,tied_ref=tied_ref)
+        if parameter_steps is not None:
+            parameter_steps={**self.manifest.get('parameter_steps',{}),**parameter_steps}
+            payload['parameter_steps']=parameter_steps
+        durable_torch(self.root/filename,payload)
+        self.fault('cursor_file_durable')
+        # Publish clocks and the replay cursor in the same atomic manifest.
         transaction.update(cursor=filename,next_stage=index-1,journal=None)
+        if tied_ref is not None:transaction['tied_ref']=tied_ref
+        if parameter_steps is not None:self.manifest['parameter_steps']=dict(parameter_steps)
         durable_json(self.root/'manifest.json',self.manifest)
         self.fault('cursor_manifest_durable')
-        shutil.rmtree(self.root/'journal')
+        shutil.rmtree(self.root/'journal',ignore_errors=True)
         if previous!=filename:(self.root/previous).unlink(missing_ok=True)
+
+    def load_cursor(self):
+        cursor=torch.load(self.root/self.manifest['transaction']['cursor'],weights_only=True,map_location='cpu')
+        reference=cursor.get('tied_ref')
+        if reference is not None:
+            if reference!='transaction-tied.pt':raise ValueError('invalid tied-gradient reference')
+            cursor['tied']=torch.load(self.root/reference,weights_only=True,map_location='cpu')
+        return cursor
 
     def read_into(self, name, destination):
         entry = self.entries[name]
@@ -206,15 +232,27 @@ class DiskState:
         if transaction:
             (self.root/transaction['cursor']).unlink(missing_ok=True)
             (self.root/'transaction-input.pt').unlink(missing_ok=True)
+            (self.root/'transaction-tied.pt').unlink(missing_ok=True)
 
 
 class DiskDLS(StreamTrainEngine):
-    def __init__(self, model, store, device='cpu', dtype=torch.float32, lr=.001, async_mode=False):
+    def __init__(self, model, store, device='cpu', dtype=torch.float32, lr=.001, async_mode=False, fp8_transfer=False, cpu_prefetch=False):
         # Parent requires CPU parameters; meta definitions allocate no canonical model.
         # Build parent with a temporary metadata-only override of that check.
         self.store, self.lr = store, lr
+        from .precision import DynamicLossScale
+        self.scaler=DynamicLossScale()
+        if store.manifest.get('loss_scaler'):self.scaler.load_state_dict(store.manifest['loss_scaler'])
+        self.loss_scale=self.scaler.scale if dtype==torch.float16 else 1.
         self.model, self.device, self.dtype = model, torch.device(device), dtype
         self.async_mode = async_mode
+        self.phase_seconds={}
+        self.compute_events=[]
+        self.fp8_transfer=fp8_transfer
+        self.cpu_prefetch=cpu_prefetch
+        from .prefetch import SlotPrefetch
+        self.prefetch=SlotPrefetch() if cpu_prefetch else None
+        if fp8_transfer and dtype!=torch.float16:raise ValueError('FP8 temporary transport requires FP16 compute')
         if async_mode and self.device.type != 'cuda':
             raise ValueError('asynchronous disk fetch requires CUDA')
         from .engine import Stage, Slot
@@ -236,7 +274,43 @@ class DiskDLS(StreamTrainEngine):
                     module.sources = torch.arange(capacity).view(1, -1, 1)
                     module.targets = torch.arange(capacity).roll(-1).view(1, -1)
 
+    def timing(self,name,elapsed):
+        self.phase_seconds[name]=self.phase_seconds.get(name,0.)+elapsed
+
+    def collect_compute_timing(self):
+        if self.device.type=='cuda':
+            torch.cuda.synchronize(self.device)
+            for phase,start,end in self.compute_events:self.timing(phase+'_compute_stream_elapsed',start.elapsed_time(end)/1000)
+            self.compute_events=[]
+        return dict(self.phase_seconds)
+
     def load(self, index, slot):
+        if self.prefetch is None:
+            return self._load_sync(index,slot)
+        self.prefetch.submit(slot,lambda:self._load_on_device(index,slot))
+
+    def _load_on_device(self,index,slot):
+        # CUDA device/stream context is thread-local, including allocations
+        # inside FP8 packing and unpacking. Never rely on the worker default.
+        with torch.cuda.device(self.device) if self.device.type=='cuda' else nullcontext():
+            return self._load_sync(index,slot)
+
+    def parameters(self,index,slot,grad):
+        if self.prefetch is not None:self.prefetch.wait(slot)
+        return super().parameters(index,slot,grad)
+
+    def close(self):
+        try:
+            if self.prefetch is not None:self.prefetch.close()
+        finally:
+            # Retain staging tensors through the last DMA completion.
+            if self.async_mode:
+                for slot in self.slots:
+                    if slot.loaded is not None:slot.loaded.synchronize()
+                    if slot.done is not None:slot.done.synchronize()
+
+    def _load_sync(self, index, slot):
+        read_started=time.perf_counter()
         if self.async_mode and slot.loaded is not None:
             slot.loaded.synchronize()
         offset = 0
@@ -251,34 +325,74 @@ class DiskDLS(StreamTrainEngine):
                 self.store.read_into(self.canonical[id(parameter)], work)
                 destination.copy_(work)
             offset += size
+        self.timing('canonical_read_and_cast_wall',time.perf_counter()-read_started)
+        transfer_started=time.perf_counter()
+        # Retain pinned byte/scales buffers and device buffers through the H2D
+        # completion event. The next load synchronizes it before reuse/deletion.
+        slot.fp8_pending=[]
         with torch.cuda.stream(self.h2d) if self.async_mode else nullcontext():
             if self.async_mode and slot.done is not None:
                 self.h2d.wait_event(slot.done)
-            slot.weights[:offset].copy_(slot.host[:offset], non_blocking=self.async_mode)
+            from .precision import fp8_eligible,pack_fp8,unpack_fp8
+            offset=0;transferred=0
+            for name,parameter in self.specs[index]:
+                size=parameter.numel();canonical=self.canonical[id(parameter)]
+                if self.fp8_transfer and fp8_eligible(canonical):
+                    pack_started=time.perf_counter()
+                    encoded,scales=pack_fp8(slot.host[offset:offset+size])
+                    self.timing('fp8_pack_cpu_wall',time.perf_counter()-pack_started)
+                    if self.async_mode:encoded=encoded.pin_memory();scales=scales.pin_memory()
+                    encoded_device=encoded.to(self.device,non_blocking=self.async_mode)
+                    scales_device=scales.to(self.device,non_blocking=self.async_mode)
+                    slot.weights[offset:offset+size].copy_(unpack_fp8(encoded_device,scales_device,self.dtype))
+                    slot.fp8_pending.append((encoded,scales,encoded_device,scales_device))
+                    transferred+=size+scales.numel()*4
+                else:
+                    slot.weights[offset:offset+size].copy_(slot.host[offset:offset+size],non_blocking=self.async_mode)
+                    transferred+=size*slot.weights.element_size()
+                offset+=size
             if self.async_mode:
                 slot.loaded = torch.cuda.Event()
                 slot.loaded.record(self.h2d)
+        self.timing('transfer_prepare_and_schedule_wall',time.perf_counter()-transfer_started)
         slot.version = self.parameter_version
-        self.transfer_bytes['h2d_weights'] += offset * slot.weights.element_size()
+        self.transfer_bytes['h2d_weights'] += transferred
+
+    def report(self,phase,index,micro=None):
+        callback=getattr(self,'progress',None)
+        if callback is not None:callback(phase,index,micro)
 
     def boundaries(self, batches):
-        checkpoints = []
+        """Layer-major forward: one weight fetch per layer across all micros.
+
+        Only one microbatch activation is on the compute device at a time.
+        Current stages have no dropout/random forward operations; introducing
+        those requires explicit per-stage/per-micro RNG replay state.
+        """
+        checkpoints=[[] for _ in batches];states=[]
         for batch in batches:
-            tokens,proof_graph=unpack_batch(batch,self.device)
-            state = (tokens.to(self.device) if proof_graph is not None else tokens[:, :-1].to(self.device), None)
-            saved = []
-            self.load(0, self.slots[0])
-            for index in range(len(self.stages)-1):
-                saved.append(tuple(v.detach().cpu() if v is not None else None for v in state))
-                slot = self.slots[index % 2]
-                if index + 1 < len(self.stages)-1:
-                    self.load(index+1, self.slots[(index+1) % 2])
-                params = self.parameters(index, slot, False)
-                with torch.no_grad(), torch.autocast(self.device.type, dtype=self.dtype, enabled=self.dtype == torch.bfloat16):
-                    state = functional_call(self.stages[index], params, state)
-                self.release(slot)
-            saved.append(tuple(v.detach().cpu() if v is not None else None for v in state))
-            checkpoints.append(saved)
+            tokens,proof_graph=unpack_batch(batch,'cpu')
+            states.append((tokens if proof_graph is not None else tokens[:,:-1],None))
+        self.load(0,self.slots[0])
+        for index in range(len(self.stages)-1):
+            slot=self.slots[index%2]
+            if index+1<len(self.stages)-1:self.load(index+1,self.slots[(index+1)%2])
+            params=self.parameters(index,slot,False)
+            for micro,state in enumerate(states):
+                self.report('forward',index,micro)
+                checkpoints[micro].append(state)
+                device_state=tuple(value.to(self.device) if value is not None else None for value in state)
+                compute_started=time.perf_counter()
+                if self.device.type=='cuda':
+                    event_start=torch.cuda.Event(enable_timing=True);event_end=torch.cuda.Event(enable_timing=True);event_start.record()
+                with torch.no_grad(),torch.autocast(self.device.type,dtype=self.dtype,enabled=self.dtype in (torch.bfloat16,torch.float16)):
+                    result=functional_call(self.stages[index],params,device_state)
+                if self.device.type=='cuda':event_end.record();self.compute_events.append(('forward',event_start,event_end))
+                states[micro]=tuple(value.detach().cpu() if value is not None else None for value in result)
+                self.timing('forward_compute_and_boundary_copy_wall',time.perf_counter()-compute_started)
+                del result,device_state
+            self.release(slot)
+        for micro,state in enumerate(states):checkpoints[micro].append(state)
         return checkpoints
 
     def reverse(self, batches, checkpoints, update=False, clip=1.,initial_cursor=False):
@@ -288,7 +402,7 @@ class DiskDLS(StreamTrainEngine):
         if update and self.store.manifest.get('transaction') and not initial_cursor:
             self.store.recover_stage()
             transaction=self.store.manifest['transaction']
-            cursor=torch.load(self.store.root/transaction['cursor'],weights_only=True,map_location='cpu')
+            cursor=self.store.load_cursor()
             cotangents=[None if values is None else [v.to(self.device) for v in values] for values in cursor['cotangents']]
             tied=cursor['tied']
             start_stage=transaction['next_stage']
@@ -298,6 +412,7 @@ class DiskDLS(StreamTrainEngine):
         if start_stage<0:return 0.,0.
         self.load(start_stage, self.slots[start_stage % 2])
         for index in reversed(range(start_stage+1)):
+            self.report('update_reverse' if update else 'norm_reverse',index)
             slot = self.slots[index % 2]
             if index:
                 self.load(index-1, self.slots[(index-1) % 2])
@@ -310,20 +425,28 @@ class DiskDLS(StreamTrainEngine):
                 state_values = [v for v in state if v is not None] if index else []
                 weights = [params[name] for name, _ in self.specs[index]]
                 values = state_values + weights
-                with torch.enable_grad(), torch.autocast(self.device.type, dtype=self.dtype, enabled=self.dtype == torch.bfloat16):
+                phase='update_reverse' if update else 'norm_reverse'
+                compute_started=time.perf_counter()
+                if self.device.type=='cuda':
+                    event_start=torch.cuda.Event(enable_timing=True);event_end=torch.cuda.Event(enable_timing=True);event_start.record()
+                with torch.enable_grad(), torch.autocast(self.device.type, dtype=self.dtype, enabled=self.dtype in (torch.bfloat16,torch.float16)):
                     output = functional_call(self.stages[index], params, (*state,proof_graph))
                     if cotangents[micro] is None:
                         loss = stage_loss(output,batch,self.device)
                         total_loss += loss.detach().item() / len(batches)
-                        grads = torch.autograd.grad(loss / len(batches), values, allow_unused=True)
+                        grads = torch.autograd.grad(loss * self.loss_scale / len(batches), values, allow_unused=True)
                     else:
                         grads = torch.autograd.grad([v for v in output if v is not None], values,
                                                     cotangents[micro], allow_unused=True)
+                if self.device.type=='cuda':event_end.record();self.compute_events.append((phase,event_start,event_end))
+                self.timing(phase+'_launch_wall',time.perf_counter()-compute_started)
+                copy_started=time.perf_counter()
                 grads = [torch.zeros_like(v) if g is None else g for v, g in zip(values, grads)]
                 cotangents[micro] = grads[:len(state_values)] if index else None
                 for destination, gradient in zip(accumulated, grads[len(state_values):]):
-                    destination.add_(gradient.detach().float().cpu())
+                    destination.add_(gradient.detach().float().cpu()/self.loss_scale)
                     self.transfer_bytes['d2h_gradients'] += gradient.numel() * 4
+                self.timing('gradient_d2h_and_accumulation_wall',time.perf_counter()-copy_started)
                 del output, params, weights, values, state_values, grads
             if update:
                 names=[self.canonical[id(parameter)] for _,parameter in self.specs[index]
@@ -354,16 +477,23 @@ class DiskDLS(StreamTrainEngine):
             raise RuntimeError('pending transaction: call resume_step before starting another step')
         if not batches or max_norm <= 0:
             raise ValueError('nonempty microbatches and positive clipping threshold required')
+        self.report('forward_start',0)
         checkpoints = self.boundaries(batches)
-        norm, loss = self.reverse(batches, checkpoints)
-        if not math.isfinite(norm) or not math.isfinite(loss):
-            raise FloatingPointError('nonfinite gradients; disk state unchanged')
+        while True:
+            self.loss_scale=self.scaler.scale if self.dtype==torch.float16 else 1.
+            norm, loss = self.reverse(batches, checkpoints)
+            if math.isfinite(norm) and math.isfinite(loss):break
+            if self.dtype!=torch.float16 or not math.isfinite(loss):
+                raise FloatingPointError('nonfinite gradients/loss; disk state unchanged')
+            self.scaler.overflow()
         clip = min(1., max_norm / (norm + 1e-6))
-        durable_torch(self.store.root/'transaction-input.pt',dict(batches=batches,checkpoints=checkpoints,clip=clip,loss=loss,norm=norm))
+        durable_torch(self.store.root/'transaction-input.pt',dict(batches=batches,checkpoints=checkpoints,clip=clip,loss=loss,norm=norm,loss_scale=self.loss_scale,dtype=str(self.dtype),fp8_transfer=self.fp8_transfer))
         durable_torch(self.store.root/'cursor-initial.pt',dict(cotangents=[None]*len(batches),tied=None))
         self.store.manifest.update(dirty=True,transaction=dict(next_stage=len(self.stages)-1,cursor='cursor-initial.pt',journal=None))
         durable_json(self.store.root/'manifest.json',self.store.manifest)
         self.reverse(batches,checkpoints,update=True,clip=clip,initial_cursor=True)
+        if self.dtype==torch.float16:
+            self.scaler.success();self.store.manifest['loss_scaler']=self.scaler.state_dict()
         self.store.finish_step()
         self.parameter_version=self.store.manifest['step']
         return dict(loss=loss, grad_norm=norm)
@@ -373,7 +503,13 @@ class DiskDLS(StreamTrainEngine):
         if not self.store.manifest.get('transaction'):
             raise ValueError('no recoverable transaction')
         saved=torch.load(self.store.root/'transaction-input.pt',weights_only=True,map_location='cpu')
+        if saved.get('dtype',str(self.dtype))!=str(self.dtype) or saved.get('fp8_transfer',False)!=self.fp8_transfer:
+            raise ValueError('transaction precision/FP8 transport differs; resume original settings')
+        self.loss_scale=saved.get('loss_scale',1.)
+        if self.dtype==torch.float16:self.scaler.scale=self.loss_scale
         self.reverse(saved['batches'],saved['checkpoints'],update=True,clip=saved['clip'])
+        if self.dtype==torch.float16:
+            self.scaler.success();self.store.manifest['loss_scaler']=self.scaler.state_dict()
         self.store.finish_step()
         self.parameter_version=self.store.manifest['step']
         return dict(loss=saved['loss'],grad_norm=saved['norm'])
@@ -387,7 +523,7 @@ def estimate_disk_budget(model, batch_size, length, accumulation, dtype):
     stage_size = max(sum(p.numel() for p in stage.parameters()) for stage in stages)
     largest = max(p.numel() for p in model.parameters())
     count = sum(p.numel() for p in model.parameters())
-    element = 2 if dtype == torch.bfloat16 else 4
+    element = 2 if dtype in (torch.bfloat16,torch.float16) else 4
     graph = cfg.graph_nodes * cfg.d_graph if cfg.graph_enabled else 0
     boundaries = accumulation * (cfg.num_layers+2) * batch_size * length * (cfg.d_model+graph) * 4
     host = (2*stage_size*(element+4) + stage_size*4 + model.embedding.weight.numel()*4

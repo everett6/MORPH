@@ -4,7 +4,7 @@ import copy
 import json
 from pathlib import Path
 import torch
-from morph import MorphConfig, MorphModel
+from morph.factory import config_from_dict, model_from_config
 from morph.graph import ActionType, ProofGraph, Status, apply_action
 from morph.graph.tensors import tensorize
 from .proof import joint_loss
@@ -35,6 +35,8 @@ def proof_batch(example,cfg,device):
 def collate_proof(examples,cfg,sequence_length,device='cpu'):
     graphs=[ProofGraph.restore(example['graph']) for example in examples]
     tensors,maps=tensorize(graphs,cfg.graph_nodes,cfg.statement_field_length,device=device)
+    if any(len(example['text'].encode())>sequence_length and (getattr(cfg,'model_type',None)=='delta' or 'payload_start' in example) for example in examples):
+        raise ValueError('proof sequence would truncate its text/payload; increase sequence_length')
     texts=[list(example['text'].encode())[:sequence_length] for example in examples]
     if any(len(text)<2 for text in texts):raise ValueError('proof text needs at least two tokens')
     length=max(map(len,texts))
@@ -58,9 +60,11 @@ def collate_proof(examples,cfg,sequence_length,device='cpu'):
 
 
 def run_proof_training(config,path,steps=10,lr=.001,device='cpu',checkpoint=None,split='train',sequence_length=64,
-                       engine='resident',batch_size=1,accumulation=1,dtype=torch.float32,state_dir=None,resume=False,checkpoint_every=100,resume_path=None,seed=42):
+                       engine='resident',batch_size=1,accumulation=1,dtype=torch.float32,state_dir=None,resume=False,checkpoint_every=100,resume_path=None,seed=42,continue_lm_state=False):
     if steps<0 or lr<=0 or sequence_length<2 or batch_size<1 or accumulation<1:
         raise ValueError('invalid proof training schedule')
+    if dtype==torch.float16 and engine!='disk':
+        raise ValueError('FP16 proof training requires disk engine with dynamic loss scaling')
     cfg=replace(config,proof_enabled=True)
     if cfg.vocab_size<256:raise ValueError('fixed proof byte tokenizer requires vocab_size>=256')
     examples=load_examples(path,split)
@@ -74,21 +78,34 @@ def run_proof_training(config,path,steps=10,lr=.001,device='cpu',checkpoint=None
     from streamtrain.disk import DiskDLS,DiskState
     if engine=='disk':
         if state_dir is None:raise ValueError('disk proof training requires state_dir')
-        with torch.device('meta'):model=MorphModel(cfg)
+        with torch.device('meta'):model=model_from_config(cfg)
         store=DiskState.open(state_dir,model) if resume else DiskState.create(state_dir,model,seed=seed)
-        if resume and store.manifest.get('proof_settings')!=settings:raise ValueError('proof resume data/settings differ')
+        if resume and store.manifest.get('proof_settings')!=settings:
+            if not continue_lm_state or store.manifest.get('proof_settings') is not None:
+                raise ValueError('proof resume data/settings differ')
+            if store.manifest.get('dirty') or store.manifest.get('transaction'):
+                raise ValueError('LM-to-proof transition requires a clean state')
+            progress_path=store.root.parent/'stream-state.json'
+            previous=None
+            if progress_path.exists():
+                previous=json.loads(progress_path.read_text())
+                if previous.get('source',{}).get('pending') is not None:raise ValueError('commit pending LM source before transition')
+            store.manifest['phase_transition']=dict(from_phase='language_model',to_phase='joint_proof',step=store.manifest['step'],
+                previous_settings=store.manifest.get('settings'),previous_proof_settings=None,previous_source_progress=previous)
         store.manifest['proof_settings']=settings;durable_json(store.root/'manifest.json',store.manifest)
-        trainer=DiskDLS(model,store,device,dtype,lr,async_mode=device.startswith('cuda'))
+        from streamtrain.sparse_disk import SparseDiskDLS
+        trainer_type=SparseDiskDLS if getattr(cfg,'model_type',None)=='delta' else DiskDLS
+        trainer=trainer_type(model,store,device,dtype,lr,async_mode=str(device).startswith('cuda'),cpu_prefetch=True)
         if store.manifest.get('transaction'):trainer.resume_step()
         start=store.manifest['step'];optimizer=None
     else:
-        model=MorphModel(cfg).to(device if engine=='resident' else 'cpu')
+        model=model_from_config(cfg).to(device if engine=='resident' else 'cpu')
         optimizer=torch.optim.AdamW(model.parameters(),lr=lr,weight_decay=.01,foreach=False)
         trainer=None if engine=='resident' else StreamTrainEngine(model,device,engine=='async',dtype)
         start=0
         if resume:
             saved=torch.load(resume_path or checkpoint,map_location='cpu',weights_only=True)
-            if MorphConfig(**saved['config']).to_dict()!=cfg.to_dict() or saved['settings']!=settings:raise ValueError('proof resume config/data/settings differ')
+            if config_from_dict(saved['config']).to_dict()!=cfg.to_dict() or saved['settings']!=settings:raise ValueError('proof resume config/data/settings differ')
             model.load_state_dict(saved['model']);optimizer.load_state_dict(saved['optimizer']);start=saved['step']
             torch.set_rng_state(saved['rng'])
             if device.startswith('cuda'):torch.cuda.set_rng_state_all(saved['cuda_rng'])
@@ -116,6 +133,7 @@ def run_proof_training(config,path,steps=10,lr=.001,device='cpu',checkpoint=None
                     with torch.autocast(torch.device(device).type,dtype=dtype,enabled=dtype==torch.bfloat16):
                         output=model.forward_proof(tokens,graph)
                         loss,_=joint_loss(output,tokens,graph,batch['actions'].to(device),batch['targets'].to(device),batch['values'].to(device),batch.get('weights'))
+                        loss=loss+output.get('router_aux_loss',0)
                     if not torch.isfinite(loss):raise FloatingPointError('nonfinite joint loss')
                     (loss/accumulation).backward();total+=loss.item()/accumulation
             torch.nn.utils.clip_grad_norm_(model.parameters(),1.,error_if_nonfinite=True);optimizer.step()
@@ -125,7 +143,7 @@ def run_proof_training(config,path,steps=10,lr=.001,device='cpu',checkpoint=None
     save_proof(steps)
     if engine=='disk':
         from streamtrain.proof_inference import DiskProofModel
-        return DiskProofModel(model,store,device,dtype),losses
+        return DiskProofModel(model,store,device,dtype,executor=trainer),losses
     return model,losses
 
 

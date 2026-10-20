@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "architecture": "delta",
+  "config": {
+    "model_type": "delta",
+    "vocab_size": 256,
+    "d_model": 32,
+    "num_layers": 2,
+    "d_ff": 64,
+    "expand": 2,
+    "d_state": 4,
+    "head_dim": 16,
+    "ssm_backend": "parallel",
+    "scan_chunk_size": 32,
+    "graph_enabled": false,
+    "graph_update": true,
+    "graph_interval": 4,
+    "d_graph": 16,
+    "graph_nodes": 4,
+    "reasoning_steps": 4,
+    "proof_enabled": false,
+    "statement_field_length": 128,
+    "fast_memory_enabled": true,
+    "memory_dim": 8,
+    "expert_count": 4,
+    "expert_depth": 2,
+    "expert_ffn": 64,
+    "latent_dim": 16,
+    "latent_experts": true,
+    "top_k": 1,
+    "router_aux_weight": 0.01,
+    "norm_eps": 1e-06
+  },
+  "platform": {
+    "python": "3.14.7",
+    "torch": "2.14.0+cu130",
+    "cuda": "13.0",
+    "device": "cuda",
+    "name": "NVIDIA GeForce RTX 5070",
+    "capability": [
+      12,
+      0
+    ]
+  },
+  "seed": 43,
+  "training_tokens": 64,
+  "microbatches": 2,
+  "precision": "FP32 canonical masters and Adam moments; FP16 compute",
+  "fp8": "E4M3FN temporary transport; 256-element blocks; FP32 scales; unpack to FP16",
+  "eligible_parameters": [
+    "blocks.0.ffn.gate.weight",
+    "blocks.0.ffn.up.weight",
+    "blocks.0.ffn.down.weight",
+    "blocks.1.ffn.gate.weight",
+    "blocks.1.ffn.up.weight",
+    "blocks.1.ffn.down.weight",
+    "experts.0.layers.0.ffn.gate.weight",
+    "experts.0.layers.0.ffn.up.weight",
+    "experts.0.layers.0.ffn.down.weight",
+    "experts.0.layers.1.ffn.gate.weight",
+    "experts.0.layers.1.ffn.up.weight",
+    "experts.0.layers.1.ffn.down.weight",
+    "experts.1.layers.0.ffn.gate.weight",
+    "experts.1.layers.0.ffn.up.weight",
+    "experts.1.layers.0.ffn.down.weight",
+    "experts.1.layers.1.ffn.gate.weight",
+    "experts.1.layers.1.ffn.up.weight",
+    "experts.1.layers.1.ffn.down.weight",
+    "experts.2.layers.0.ffn.gate.weight",
+    "experts.2.layers.0.ffn.up.weight",
+    "experts.2.layers.0.ffn.down.weight",
+    "experts.2.layers.1.ffn.gate.weight",
+    "experts.2.layers.1.ffn.up.weight",
+    "experts.2.layers.1.ffn.down.weight",
+    "experts.3.layers.0.ffn.gate.weight",
+    "experts.3.layers.0.ffn.up.weight",
+    "experts.3.layers.0.ffn.down.weight",
+    "experts.3.layers.1.ffn.gate.weight",
+    "experts.3.layers.1.ffn.up.weight",
+    "experts.3.layers.1.ffn.down.weight"
+  ],
+  "reference": {
+    "loss": 5.556604862213135,
+    "grad_norm": 1.0172683541536913
+  },
+  "approximate": {
+    "loss": 5.556914567947388,
+    "grad_norm": 1.0186444217817738
+  },
+  "learning_rate": 0.0001,
+  "max_norm": 0.2,
+  "clip_reference": 0.19660476272421315,
+  "clip_approximate": 0.1963391733015086,
+  "update_cosine": 0.958691426385786,
+  "transfer_bytes": [
+    {
+      "h2d_weights": 561028,
+      "d2h_gradients": 1165664
+    },
+    {
+      "h2d_weights": 452164,
+      "d2h_gradients": 1165664
+    }
+  ],
+  "relative_loss_drift": 5.573650492210405e-05,
+  "relative_global_norm_drift": 0.0013527085773029086,
+  "update_relative_l2": 0.2874027621882915,
+  "finite": true,
+  "limits": {
+    "relative_loss": 0.02,
+    "relative_global_norm": 0.1,
+    "update_relative_l2": 0.1
+  },
+  "passed": false,
+  "claims": "Tiny two-pass full optimizer numerical gate only; no full5B, proof-quality, convergence, FP8-GEMM, or throughput claim"
+}

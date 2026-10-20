@@ -1,5 +1,23 @@
 # MORPH research implementation
 
+## Native sparse MORPH-Delta
+
+The new [Delta training guide](docs/delta_training_ready.md) covers the
+**4,981,264,481-parameter** sparse SSM/proof model, differentiable session memory,
+versioned graph caches, conditional FP32 AdamW, CPU/CUDA ping-pong prefetch, and
+bounded Hugging Face math streaming without a local dataset cache.
+
+```bash
+python -m streamtrain.delta_cycle --preflight
+python -m streamtrain.delta_cycle --target-tokens 1000000000
+```
+
+The selected run uses FP16 computation/exports and FP32 masters/moments. The
+Delta FP8 accuracy gate failed, so FP8 is disabled. Full-model preflight checks
+RAM, VRAM, state/journal space and replacement exports before allocation.
+
+## Dense reference
+
 Executable native causal selective-SSM/SwiGLU model with tied embeddings,
 fixed neural graph memory, four shared graph refinement iterations, and
 Dynamic Layer-Sequential Forward-Backward (DLS-FB) training. This is a tested
@@ -18,7 +36,8 @@ width 6144, retaining the existing graph settings. Its LM baseline has
 **5,048,331,103 parameters**. Canonical disk AdamW weights/moments need
 **60,409,704,192 bytes (56.26 GiB)** for LM or **60,579,973,236 bytes
 (56.42 GiB)** for proof mode, before journals, activations and reserve.
-These are meta counts/resource estimates; no full 5B training was run.
+The dense model completed one 1,024-token calibration update. Its old FP32
+training state was retired with user approval; its verified FP16 export remains.
 For a fixed token budget, parameter-based compute is approximately 28% lower;
 actual wall time depends on replay, disk/PCIe traffic and kernel efficiency.
 Parameter count alone does not determine the training token budget.
@@ -27,6 +46,9 @@ Parameter count alone does not determine the training token budget.
 python train.py --config configs/morph_5b.json --inspect --engine disk
 python train.py --config configs/morph_5b.json --proof-traces docs/proof_examples.jsonl --inspect --engine disk
 ```
+
+[Local 5B math training cycle](docs/math_training_cycle.md) documents the
+historical dense calibration. Use the Delta guide above for the new streamed run.
 
 ## Train within the current RAM limit
 
