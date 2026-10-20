@@ -10,19 +10,25 @@ from torch.nn import functional as F
 from .morph_model import RMSNorm,SwiGLU,MorphBlock
 
 
-def router_balance(gates):
+def router_balance(gates,eligible_count=None):
     routes=gates.argmax(-1)
     frequency=F.one_hot(routes,num_classes=gates.shape[-1]).float().mean((0,1))
-    return gates.shape[-1]*(frequency.detach()*gates.float().mean((0,1))).sum()
+    return (eligible_count or gates.shape[-1])*(frequency.detach()*gates.float().mean((0,1))).sum()
 
 
 class SparseRouter(nn.Module):
     def __init__(self,cfg):
         super().__init__();self.projection=nn.Linear(cfg.d_model,cfg.expert_count)
+        self.eligible=None
     def forward(self,x):
         # Routing logits/probabilities remain FP32 under mixed precision.
         with torch.autocast(x.device.type,enabled=False):
-            return F.linear(x.float(),self.projection.weight.float(),self.projection.bias.float()).softmax(-1)
+            logits=F.linear(x.float(),self.projection.weight.float(),self.projection.bias.float())
+            if self.eligible is not None:
+                mask=torch.ones(logits.shape[-1],device=x.device,dtype=torch.bool)
+                mask[list(self.eligible)]=False
+                logits=logits.masked_fill(mask,float('-inf'))
+            return logits.softmax(-1)
 
 
 class ExpertBundle(nn.Module):
@@ -171,10 +177,11 @@ class HeadStage(nn.Module):
         super().__init__();self.norm=model.norm;self.weight=model.embedding.weight
         self.proof=model.proof_head if model.config.proof_enabled else None
         self.aux_weight=model.config.router_aux_weight
+        self.eligible_count=model.config.step_expert_count or model.config.expert_count
     def forward(self,x,aux=None,proof_graph=None):
         if self.proof is not None and proof_graph is not None:output=self.proof(x,None,proof_graph)
         else:output=dict(logits=F.linear(self.norm(x),self.weight))
-        balance=router_balance(aux) if aux is not None else x.new_zeros(())
+        balance=router_balance(aux,self.eligible_count) if aux is not None else x.new_zeros(())
         return dict(**output,lm_logits=output['logits'],router_balance_loss=balance,router_aux_loss=balance*self.aux_weight,
                     routes=None if aux is None else aux.argmax(-1),states=None)
 
@@ -200,6 +207,37 @@ class DeltaModel(nn.Module):
             from .proof_head import ProofHead
             self.reasoning=ReasoningCore(cfg);self.proof_head=ProofHead(self)
         self.apply(self._initialize)
+        self.set_routing_step(0)
+    def _routing_plan(self,step):
+        if type(step) is not int or step<0:raise ValueError('routing step/session id must be a nonnegative integer')
+        cfg=self.config;count=cfg.step_expert_count or cfg.expert_count
+        generator=torch.Generator(device='cpu').manual_seed(cfg.routing_seed)
+        # Explicit CPU construction also works while model parameters are meta.
+        permutation=torch.randperm(cfg.expert_count,generator=generator,device='cpu').tolist()
+        experts=[permutation[(step*count+i)%cfg.expert_count] for i in range(count)]
+        return dict(version=1,step=step,seed=cfg.routing_seed,expert_count=cfg.expert_count,
+                    step_expert_count=cfg.step_expert_count,experts=experts)
+
+    def set_routing_step(self,step):
+        """Install one content-independent roster for every microbatch in a step."""
+        plan=self._routing_plan(step);self._routing_step=step
+        self.router.eligible=tuple(plan['experts']) if self.config.step_expert_count else None
+        return plan
+
+    def set_roster(self,session_id):
+        """Inference uses an explicit stable session id with the training policy.
+
+        Keep it fixed throughout a generated sequence, including prefix replays.
+        """
+        return self.set_routing_step(session_id)
+
+    def get_routing_plan(self):return self._routing_plan(self._routing_step)
+
+    def restore_routing_plan(self,plan):
+        if not isinstance(plan,dict) or plan!=self._routing_plan(plan.get('step')):
+            raise ValueError('routing plan does not match configured deterministic policy')
+        return self.set_routing_step(plan['step'])
+
     @staticmethod
     def _initialize(module):
         if isinstance(module,(nn.Linear,nn.Embedding)):

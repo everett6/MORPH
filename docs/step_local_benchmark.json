@@ -1,0 +1,401 @@
+{
+  "parameters": 879532,
+  "config": {
+    "model_type": "delta",
+    "vocab_size": 256,
+    "d_model": 32,
+    "num_layers": 1,
+    "d_ff": 64,
+    "expand": 2,
+    "d_state": 4,
+    "head_dim": 16,
+    "ssm_backend": "parallel",
+    "scan_chunk_size": 32,
+    "graph_enabled": false,
+    "graph_update": true,
+    "graph_interval": 4,
+    "d_graph": 16,
+    "graph_nodes": 4,
+    "reasoning_steps": 4,
+    "proof_enabled": false,
+    "statement_field_length": 128,
+    "fast_memory_enabled": false,
+    "memory_dim": 8,
+    "expert_count": 64,
+    "expert_depth": 2,
+    "expert_ffn": 128,
+    "latent_dim": 16,
+    "latent_experts": true,
+    "step_expert_count": 0,
+    "routing_seed": 42,
+    "top_k": 1,
+    "router_aux_weight": 0.01,
+    "norm_eps": 1e-06
+  },
+  "quota": 8,
+  "steps": 3,
+  "sequence_length": 16,
+  "batch_size": 2,
+  "accumulation": 2,
+  "seed": 42,
+  "threads": 2,
+  "device": "cpu",
+  "precision": "float32",
+  "torch_version": "2.14.0+cu130",
+  "temporary_store_parent": "/home/everett/.codex/worktrees/delta-training-speed/MORPH",
+  "cpu": "AMD Ryzen 9 7950X 16-Core Processor",
+  "comparisons": {
+    "quota_single_pass": {
+      "max_abs_weight": 0.0,
+      "max_abs_m": 0.0,
+      "max_abs_v": 0.0,
+      "clocks_equal": true
+    },
+    "quota_single_pass_cache": {
+      "max_abs_weight": 0.0,
+      "max_abs_m": 0.0,
+      "max_abs_v": 0.0,
+      "clocks_equal": true
+    }
+  },
+  "variants": [
+    {
+      "variant": "unrestricted_two_pass",
+      "steps": [
+        {
+          "step": 1,
+          "seconds": 17.298843037999177,
+          "targets": 64,
+          "targets_per_second": 3.6996693859476966,
+          "active_expert_union": 34,
+          "loss": 5.546019792556763,
+          "grad_norm": 0.9953859008233064,
+          "process_io_delta": {
+            "rchar": 21834044,
+            "wchar": 18073642,
+            "syscr": 1559,
+            "syscw": 602,
+            "read_bytes": 135168,
+            "write_bytes": 25382912,
+            "cancelled_write_bytes": 0
+          },
+          "logical_payload_bytes": {
+            "weight_reads": 5804432,
+            "canonical_state_writes": 5739024,
+            "journal_payload_writes": 5739024
+          },
+          "gradient_stash_payload_bytes": 0
+        },
+        {
+          "step": 2,
+          "seconds": 25.134716164000565,
+          "targets": 64,
+          "targets_per_second": 2.5462790024127906,
+          "active_expert_union": 34,
+          "loss": 5.564322233200073,
+          "grad_norm": 1.0245106962877961,
+          "process_io_delta": {
+            "rchar": 5739147,
+            "wchar": 20107198,
+            "syscr": 391,
+            "syscw": 599,
+            "read_bytes": 372736,
+            "write_bytes": 27303936,
+            "cancelled_write_bytes": 0
+          },
+          "logical_payload_bytes": {
+            "weight_reads": 5804432,
+            "canonical_state_writes": 5739024,
+            "journal_payload_writes": 5739024
+          },
+          "gradient_stash_payload_bytes": 0
+        },
+        {
+          "step": 3,
+          "seconds": 25.27613373799977,
+          "targets": 64,
+          "targets_per_second": 2.5320328125888705,
+          "active_expert_union": 27,
+          "loss": 5.5510008335113525,
+          "grad_norm": 1.0066239750032624,
+          "process_io_delta": {
+            "rchar": 4615564,
+            "wchar": 19860562,
+            "syscr": 314,
+            "syscw": 522,
+            "read_bytes": 155648,
+            "write_bytes": 25735168,
+            "cancelled_write_bytes": 0
+          },
+          "logical_payload_bytes": {
+            "weight_reads": 4680848,
+            "canonical_state_writes": 4615440,
+            "journal_payload_writes": 4615440
+          },
+          "gradient_stash_payload_bytes": 0
+        }
+      ],
+      "total_targets": 192,
+      "total_seconds": 67.70969293999951,
+      "cache_stats": null
+    },
+    {
+      "variant": "quota_two_pass",
+      "steps": [
+        {
+          "step": 1,
+          "seconds": 15.319071510999493,
+          "targets": 64,
+          "targets_per_second": 4.177798892971179,
+          "active_expert_union": 8,
+          "loss": 5.54504919052124,
+          "grad_norm": 0.9992035001612565,
+          "process_io_delta": {
+            "rchar": 1565837,
+            "wchar": 12725488,
+            "syscr": 105,
+            "syscw": 312,
+            "read_bytes": 0,
+            "write_bytes": 15007744,
+            "cancelled_write_bytes": 0
+          },
+          "logical_payload_bytes": {
+            "weight_reads": 1631120,
+            "canonical_state_writes": 1565712,
+            "journal_payload_writes": 1565712
+          },
+          "gradient_stash_payload_bytes": 0
+        },
+        {
+          "step": 2,
+          "seconds": 13.970664337999551,
+          "targets": 64,
+          "targets_per_second": 4.581027677110744,
+          "active_expert_union": 8,
+          "loss": 5.564022541046143,
+          "grad_norm": 1.0259064797616684,
+          "process_io_delta": {
+            "rchar": 1565837,
+            "wchar": 13220978,
+            "syscr": 105,
+            "syscw": 312,
+            "read_bytes": 0,
+            "write_bytes": 15572992,
+            "cancelled_write_bytes": 0
+          },
+          "logical_payload_bytes": {
+            "weight_reads": 1631120,
+            "canonical_state_writes": 1565712,
+            "journal_payload_writes": 1565712
+          },
+          "gradient_stash_payload_bytes": 0
+        },
+        {
+          "step": 3,
+          "seconds": 14.585371078999742,
+          "targets": 64,
+          "targets_per_second": 4.387958294194397,
+          "active_expert_union": 8,
+          "loss": 5.551240682601929,
+          "grad_norm": 1.007969728987581,
+          "process_io_delta": {
+            "rchar": 1565837,
+            "wchar": 13720179,
+            "syscr": 105,
+            "syscw": 312,
+            "read_bytes": 4096,
+            "write_bytes": 16072704,
+            "cancelled_write_bytes": 0
+          },
+          "logical_payload_bytes": {
+            "weight_reads": 1631120,
+            "canonical_state_writes": 1565712,
+            "journal_payload_writes": 1565712
+          },
+          "gradient_stash_payload_bytes": 0
+        }
+      ],
+      "total_targets": 192,
+      "total_seconds": 43.875106927998786,
+      "cache_stats": null
+    },
+    {
+      "variant": "quota_single_pass",
+      "steps": [
+        {
+          "step": 1,
+          "seconds": 13.97987248500067,
+          "targets": 64,
+          "targets_per_second": 4.578010283617901,
+          "active_expert_union": 8,
+          "loss": 5.54504919052124,
+          "grad_norm": 0.9992035001612565,
+          "process_io_delta": {
+            "rchar": 4529895,
+            "wchar": 11752155,
+            "syscr": 1137,
+            "syscw": 414,
+            "read_bytes": 0,
+            "write_bytes": 14258176,
+            "cancelled_write_bytes": 0
+          },
+          "logical_payload_bytes": {
+            "weight_reads": 1076448,
+            "canonical_state_writes": 1565712,
+            "journal_payload_writes": 1565712
+          },
+          "gradient_stash_payload_bytes": 521904
+        },
+        {
+          "step": 2,
+          "seconds": 20.906859449998592,
+          "targets": 64,
+          "targets_per_second": 3.0611962620719826,
+          "active_expert_union": 8,
+          "loss": 5.564022541046143,
+          "grad_norm": 1.0259064797616684,
+          "process_io_delta": {
+            "rchar": 4529865,
+            "wchar": 12433708,
+            "syscr": 1137,
+            "syscw": 414,
+            "read_bytes": 0,
+            "write_bytes": 14987264,
+            "cancelled_write_bytes": 0
+          },
+          "logical_payload_bytes": {
+            "weight_reads": 1076448,
+            "canonical_state_writes": 1565712,
+            "journal_payload_writes": 1565712
+          },
+          "gradient_stash_payload_bytes": 521904
+        },
+        {
+          "step": 3,
+          "seconds": 14.996509997999965,
+          "targets": 64,
+          "targets_per_second": 4.267659609371479,
+          "active_expert_union": 8,
+          "loss": 5.551240682601929,
+          "grad_norm": 1.007969728987581,
+          "process_io_delta": {
+            "rchar": 4529840,
+            "wchar": 13134280,
+            "syscr": 1137,
+            "syscw": 414,
+            "read_bytes": 0,
+            "write_bytes": 15720448,
+            "cancelled_write_bytes": 0
+          },
+          "logical_payload_bytes": {
+            "weight_reads": 1076448,
+            "canonical_state_writes": 1565712,
+            "journal_payload_writes": 1565712
+          },
+          "gradient_stash_payload_bytes": 521904
+        }
+      ],
+      "total_targets": 192,
+      "total_seconds": 49.883241932999226,
+      "cache_stats": null
+    },
+    {
+      "variant": "quota_single_pass_cache",
+      "steps": [
+        {
+          "step": 1,
+          "seconds": 14.220711444000699,
+          "targets": 64,
+          "targets_per_second": 4.50047807045545,
+          "active_expert_union": 8,
+          "loss": 5.54504919052124,
+          "grad_norm": 0.9992035001612565,
+          "process_io_delta": {
+            "rchar": 4529896,
+            "wchar": 11752155,
+            "syscr": 1137,
+            "syscw": 414,
+            "read_bytes": 0,
+            "write_bytes": 14258176,
+            "cancelled_write_bytes": 0
+          },
+          "logical_payload_bytes": {
+            "weight_reads": 1076448,
+            "canonical_state_writes": 1565712,
+            "journal_payload_writes": 1565712
+          },
+          "gradient_stash_payload_bytes": 521904
+        },
+        {
+          "step": 2,
+          "seconds": 8.206065366000985,
+          "targets": 64,
+          "targets_per_second": 7.799109213187849,
+          "active_expert_union": 8,
+          "loss": 5.564022541046143,
+          "grad_norm": 1.0259064797616684,
+          "process_io_delta": {
+            "rchar": 4529866,
+            "wchar": 12433708,
+            "syscr": 1137,
+            "syscw": 414,
+            "read_bytes": 0,
+            "write_bytes": 14987264,
+            "cancelled_write_bytes": 0
+          },
+          "logical_payload_bytes": {
+            "weight_reads": 1076448,
+            "canonical_state_writes": 1565712,
+            "journal_payload_writes": 1565712
+          },
+          "gradient_stash_payload_bytes": 521904
+        },
+        {
+          "step": 3,
+          "seconds": 3.265676414999689,
+          "targets": 64,
+          "targets_per_second": 19.59777757099247,
+          "active_expert_union": 8,
+          "loss": 5.551240682601929,
+          "grad_norm": 1.007969728987581,
+          "process_io_delta": {
+            "rchar": 4529841,
+            "wchar": 13134280,
+            "syscr": 1137,
+            "syscw": 414,
+            "read_bytes": 131072,
+            "write_bytes": 15720448,
+            "cancelled_write_bytes": 0
+          },
+          "logical_payload_bytes": {
+            "weight_reads": 1076448,
+            "canonical_state_writes": 1565712,
+            "journal_payload_writes": 1565712
+          },
+          "gradient_stash_payload_bytes": 521904
+        }
+      ],
+      "total_targets": 192,
+      "total_seconds": 25.692453225001373,
+      "cache_stats": {
+        "hits": 648,
+        "misses": 279,
+        "evictions": 0,
+        "estimated_bytes_avoided": 6548512,
+        "oversize_fallbacks": 0,
+        "cache_bytes": 4133904,
+        "cache_budget_bytes": 33554432
+      }
+    }
+  ],
+  "limitations": [
+    "CPU small-model experiment; production GPU training was concurrent.",
+    "OS page cache is warm and uncontrolled; /proc/self/io physical counters are process-accounted, not device-wide traffic.",
+    "Logical payload counters exclude serialization metadata, cursor files and gradient-stash framing; cache read avoidance is estimated.",
+    "Quota changes the computation; unrestricted versus quota is not a numerical-parity comparison.",
+    "No full5B speed or convergence extrapolation.",
+    "One tiny CPU pytest overlapped part of this run; production training and uncontrolled filesystem scheduling also ran concurrently."
+  ],
+  "filesystem": "ext4 on /dev/nvme0n1p5 (verified with df -T)",
+  "timing_scope": "optimizer steps only; excludes imports, state initialization and final snapshot comparison"
+}
