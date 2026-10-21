@@ -8,7 +8,7 @@ import threading
 import numpy as np
 import torch
 
-from .disk import DiskState
+from .disk import DiskState, profile_fsync
 
 
 class CachedDiskState(DiskState):
@@ -132,7 +132,7 @@ class CachedDiskState(DiskState):
                 del mapped
                 descriptor = os.open(path, os.O_RDWR)
                 try:
-                    os.fsync(descriptor)
+                    profile_fsync(descriptor)
                 finally:
                     os.close(descriptor)
             except BaseException:

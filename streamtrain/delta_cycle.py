@@ -24,11 +24,15 @@ DEFAULT_STASH_BUDGET=4*2**30
 PRODUCTION_RUN='runs/morph-delta5b-hf-math'
 
 
-def experimental_options(cfg,engine,cache_bytes,stash_budget_bytes):
+def experimental_options(cfg,engine,cache_bytes,stash_budget_bytes,chunk_microbatches=0,journal_format='legacy'):
     if engine not in ('two-pass','single-pass'):raise ValueError('invalid training engine')
     if type(cache_bytes) is not int or cache_bytes<0:raise ValueError('nonnegative integer cache budget required')
     if type(stash_budget_bytes) is not int or stash_budget_bytes<1:raise ValueError('positive integer stash budget required')
-    return engine!='two-pass' or cache_bytes>0 or stash_budget_bytes!=DEFAULT_STASH_BUDGET or cfg.step_expert_count>0
+    if type(chunk_microbatches) is not int or chunk_microbatches<0:raise ValueError('nonnegative chunk microbatch count required')
+    if chunk_microbatches and engine!='single-pass':raise ValueError('bounded chunk accumulation requires single-pass')
+    if journal_format not in ('legacy','packed'):raise ValueError('unsupported journal format')
+    return (engine!='two-pass' or cache_bytes>0 or stash_budget_bytes!=DEFAULT_STASH_BUDGET or cfg.step_expert_count>0
+            or chunk_microbatches>0 or journal_format!='legacy' or cfg.expert_group_size>1 or cfg.memory_projection_backend!='reference')
 
 
 def source_from_file(path):
@@ -37,20 +41,43 @@ def source_from_file(path):
 
 def preflight(config,run_dir,source=None,source_config='configs/hf_math_stream.json',device='cuda',
               precision='fp16',length=128,batch_size=4,accumulation=8,backend='triton',export=True,
-              engine='two-pass',cache_bytes=0,stash_budget_bytes=DEFAULT_STASH_BUDGET):
+              engine='two-pass',cache_bytes=0,stash_budget_bytes=DEFAULT_STASH_BUDGET,
+              chunk_microbatches=0,journal_format='legacy'):
     cfg=replace(DeltaConfig.from_file(config),ssm_backend=backend)
-    experimental=experimental_options(cfg,engine,cache_bytes,stash_budget_bytes)
+    experimental=experimental_options(cfg,engine,cache_bytes,stash_budget_bytes,chunk_microbatches,journal_format)
     if min(length,batch_size,accumulation)<1:raise ValueError('positive sequence/batch/accumulation required')
     with torch.device('meta'):model=DeltaModel(cfg)
-    budget=estimate_disk_budget(model,batch_size,length,accumulation,DTYPES[precision])
+    window=min(accumulation,chunk_microbatches) if chunk_microbatches else accumulation
+    budget=estimate_disk_budget(model,batch_size,length,window,DTYPES[precision])
     stages=model.stream_stages()
     # Every expert boundary includes differentiable router gates. Count the
     # actual execution stages, rather than only the shared backbone's layers.
-    boundary=accumulation*batch_size*length*(cfg.d_model+cfg.expert_count)*4*len(stages)
+    boundary=window*batch_size*length*(cfg.d_model+cfg.expert_count)*4*len(stages)
     extra=max(0,boundary-budget['boundary_bytes'])
     budget['estimated_host_bytes']+=extra*3
     budget['disk_reserve_bytes']+=extra*3
     budget['boundary_bytes']=boundary
+    budget['activation_window_microbatches']=window
+    # The pending byte targets remain bounded CPU input; only activations use windows.
+    pending_input=accumulation*batch_size*(length+1)*8
+    budget['estimated_host_bytes']+=pending_input
+    budget['pending_input_bytes']=pending_input
+    group=cfg.expert_group_size;slot_bytes=4 if precision=='fp32' else 2
+    group_extra=0
+    if group>1:
+        width=cfg.latent_dim if cfg.latent_experts else cfg.d_model
+        expert_size=max(sum(p.numel() for p in expert.parameters()) for expert in model.experts)
+        group_extra=(2*group*expert_size*slot_bytes
+                     +slot_bytes*group*batch_size*length*cfg.expert_depth*(3*cfg.expert_ffn+6*width)
+                     +group*batch_size*length*(width*4+cfg.d_model*slot_bytes*2))
+    if cfg.fast_memory_enabled and cfg.memory_projection_backend=='batched':
+        group_extra+=batch_size*length*((3*cfg.memory_dim+2)*4+cfg.d_model*slot_bytes)+batch_size*cfg.d_model*slot_bytes
+    router_cotangents=2*window*batch_size*length*cfg.expert_count*4
+    recurrence=(batch_size*length*cfg.memory_dim**2*4*8 if cfg.fast_memory_enabled else 0)
+    budget['execution_extra_bytes']=group_extra
+    budget['router_cotangent_bytes']=router_cotangents
+    budget['fast_memory_recurrence_bytes']=recurrence
+    budget['estimated_cuda_bytes']+=group_extra+router_cotangents+recurrence
     parent=Path(run_dir).resolve()
     while not parent.exists():parent=parent.parent
     exists=(Path(run_dir)/'state'/'manifest.json').exists()
@@ -90,6 +117,7 @@ def preflight(config,run_dir,source=None,source_config='configs/hf_math_stream.j
                 expert_parameters=sum(p.numel() for p in model.experts.parameters()),
                 budget=budget,required_host_bytes=required_host,required_free_disk_bytes=required_disk,available_disk_bytes=free_disk,
                 experimental=experimental,engine=engine,cache_bytes=cache_bytes,stash_budget_bytes=stash_budget_bytes,
+                chunk_microbatches=chunk_microbatches,journal_format=journal_format,
                 available_ram_bytes=free_ram,available_cuda_bytes=free_cuda,
                 source_fingerprint=source.source_fingerprint,dataset_revision=source.resolved_revision,
                 dataset_cache_bytes=0,precision=precision,optimizer='FP32 conditional AdamW',
@@ -99,16 +127,18 @@ def preflight(config,run_dir,source=None,source_config='configs/hf_math_stream.j
 def run_delta_cycle(config,run_dir,target_tokens=1_000_000_000,source=None,source_config='configs/hf_math_stream.json',
                     device='cuda',precision='fp16',length=128,batch_size=4,accumulation=8,lr=1e-4,
                     max_steps=None,backend='triton',resume=False,export=True,seed=42,cpu_prefetch=True,export_every=1000,
-                    engine='two-pass',cache_bytes=0,stash_budget_bytes=DEFAULT_STASH_BUDGET):
+                    engine='two-pass',cache_bytes=0,stash_budget_bytes=DEFAULT_STASH_BUDGET,
+              chunk_microbatches=0,journal_format='legacy'):
     if target_tokens<1 or lr<=0 or (max_steps is not None and max_steps<1):raise ValueError('invalid token/step/learning-rate schedule')
     source=source or source_from_file(source_config)
     report=preflight(config,run_dir,source=source,device=device,precision=precision,length=length,
                      batch_size=batch_size,accumulation=accumulation,backend=backend,export=export,
-                     engine=engine,cache_bytes=cache_bytes,stash_budget_bytes=stash_budget_bytes)
+                     engine=engine,cache_bytes=cache_bytes,stash_budget_bytes=stash_budget_bytes,
+                     chunk_microbatches=chunk_microbatches,journal_format=journal_format)
     if not report['ready']:raise MemoryError(json.dumps(report))
     cfg=replace(DeltaConfig.from_file(config),ssm_backend=backend)
     with torch.device('meta'):model=DeltaModel(cfg)
-    experimental=experimental_options(cfg,engine,cache_bytes,stash_budget_bytes)
+    experimental=experimental_options(cfg,engine,cache_bytes,stash_budget_bytes,chunk_microbatches,journal_format)
     root=Path(run_dir)
     if experimental and root.name==Path(PRODUCTION_RUN).name:
         raise ValueError('experimental engine/cache/roster options require a separate experiment run directory')
@@ -125,8 +155,13 @@ def run_delta_cycle(config,run_dir,target_tokens=1_000_000_000,source=None,sourc
                   batch_size=batch_size,sequence_length=length,accumulation=accumulation,precision=precision,
                   lr=lr,seed=seed,optimizer='conditional-adamw-fp32',device_type=torch.device(device).type,export_every=export_every)
     if experimental:
-        settings['experimental']=dict(engine=engine,cache_bytes=cache_bytes,stash_budget_bytes=stash_budget_bytes)
-    if cache_bytes:
+        settings['experimental']=dict(engine=engine,cache_bytes=cache_bytes,stash_budget_bytes=stash_budget_bytes,
+                     chunk_microbatches=chunk_microbatches,journal_format=journal_format)
+    if journal_format=='packed':
+        from .packed_state import PackedDiskState,PackedCachedDiskState
+        state_class=PackedCachedDiskState if cache_bytes else PackedDiskState
+        state_options=dict(cache_bytes=cache_bytes) if cache_bytes else {}
+    elif cache_bytes:
         from .state_cache import CachedDiskState
         state_class=CachedDiskState;state_options=dict(cache_bytes=cache_bytes)
     else:state_class=DiskState;state_options={}
@@ -136,6 +171,9 @@ def run_delta_cycle(config,run_dir,target_tokens=1_000_000_000,source=None,sourc
             saved_settings=json.loads(settings_path.read_text())
             # New default-valued config fields must not invalidate an old run.
             saved_settings['config']=DeltaConfig(**saved_settings['config']).to_dict()
+            if 'experimental' in saved_settings:
+                saved_settings['experimental'].setdefault('chunk_microbatches',0)
+                saved_settings['experimental'].setdefault('journal_format','legacy')
             if saved_settings!=settings:raise ValueError('resume model/data/optimizer settings differ')
             store=state_class.open(root/'state',model,**state_options)
             progress=json.loads(stream_path.read_text());source.load_state_dict(progress['source'])
@@ -151,7 +189,7 @@ def run_delta_cycle(config,run_dir,target_tokens=1_000_000_000,source=None,sourc
             store=state_class.create(root/'state',model,seed=seed,progress=initializing,**state_options)
         if engine=='single-pass':
             from .single_pass import SinglePassDiskDLS
-            engine_class=SinglePassDiskDLS;engine_options=dict(stash_budget_bytes=stash_budget_bytes)
+            engine_class=SinglePassDiskDLS;engine_options=dict(stash_budget_bytes=stash_budget_bytes,chunk_microbatches=chunk_microbatches)
         else:engine_class=SparseDiskDLS;engine_options={}
         trainer=engine_class(model,store,device=device,dtype=DTYPES[precision],lr=lr,
                             async_mode=device.startswith('cuda'),cpu_prefetch=cpu_prefetch,**engine_options)
@@ -203,17 +241,28 @@ def run_delta_cycle(config,run_dir,target_tokens=1_000_000_000,source=None,sourc
                 progress.update(pending_targets=count,pending_microbatch_size=micro_size,source=source.state_dict())
                 durable_json(stream_path,progress)
             batches=list(tokens.split(micro_size));count=progress['pending_targets']
-            io_before=_io();started=time.perf_counter()
-            metrics=trainer.step(batches);seconds=time.perf_counter()-started;io_after=_io()
+            profile_before=trainer.profile_snapshot();storage_before=store.profile_snapshot()
+            io_before=_io();started=time.perf_counter();cpu_started=time.process_time()
+            metrics=trainer.step(batches)
+            profile_after=trainer.profile_snapshot(profile_before)
+            seconds=time.perf_counter()-started;cpu_seconds=time.process_time()-cpu_started;io_after=_io()
+            storage_after=store.profile_snapshot()
+            storage_delta={k:v-storage_before.get(k,0) for k,v in storage_after.items()}
+            storage_delta['journal_payload_bytes']=storage_delta.get('prepare_stage_bytes',0)
+            metrics['phase_profile']=dict(**profile_after,process_cpu_seconds=cpu_seconds,storage=storage_delta,
+                timing_semantics='wall and CUDA stream intervals overlap; CUDA intervals include stream idle; do not sum them')
             reconcile()
             metrics.update(step=store.manifest['step'],processed_target_tokens=progress['processed_target_tokens'],
                            step_target_tokens=count,step_seconds=seconds,tokens_per_second=count/max(seconds,1e-9),
-                           active_experts=sum(active for stage,active in zip(trainer.stages,trainer.active_stages) if hasattr(stage,'expert_index')),
+                           active_experts=_active_expert_count(trainer),
                            process_io_bytes={k:io_after[k]-io_before[k] for k in io_before},
                            transfer_bytes=dict(trainer.transfer_bytes),loss_scale=trainer.loss_scale)
             if experimental:
                 metrics.update(engine=engine,routing_plan=model.get_routing_plan(),
                                gradient_stash_bytes=getattr(trainer,'last_stash_bytes',0),
+                               peak_boundary_microbatches=getattr(trainer,'peak_boundary_microbatches',len(batches)),
+                               completed_microbatches=getattr(trainer,'completed_microbatches',len(batches)),
+                               journal_format=journal_format,chunk_microbatches=chunk_microbatches,
                                state_cache=getattr(store,'cache_stats',dict(cache_bytes=0,cache_budget_bytes=0)),
                                active_parameter_upper_bound=report['budget']['active_parameter_upper_bound'])
             with (root/'metrics.jsonl').open('a') as handle:
@@ -237,6 +286,19 @@ def run_delta_cycle(config,run_dir,target_tokens=1_000_000_000,source=None,sourc
         fcntl.flock(lock,fcntl.LOCK_UN);lock.close()
 
 
+def _active_expert_count(trainer):
+    union=getattr(trainer,'active_expert_union',None)
+    if union is not None:return len(union)
+    selected=set()
+    for spec,active in zip(trainer.specs,trainer.active_stages):
+        if not active:continue
+        for _,parameter in spec:
+            name=trainer.canonical[id(parameter)]
+            pieces=name.split('.')
+            if len(pieces)>2 and pieces[0]=='experts' and pieces[1].isdecimal():selected.add(int(pieces[1]))
+    return len(selected)
+
+
 def _io():
     return {key:int(value) for key,value in (line.split(':') for line in Path('/proc/self/io').read_text().splitlines()) if key in ('read_bytes','write_bytes')}
 
@@ -250,6 +312,8 @@ def main():
     parser.add_argument('--engine',choices=['two-pass','single-pass'],default='two-pass')
     parser.add_argument('--cache-bytes',type=int,default=0)
     parser.add_argument('--stash-budget-bytes',type=int,default=DEFAULT_STASH_BUDGET)
+    parser.add_argument('--chunk-microbatches',type=int,default=0,help='maximum microbatches with live activation boundaries')
+    parser.add_argument('--journal-format',choices=['legacy','packed'],default='legacy')
     parser.add_argument('--target-tokens',type=int,default=1_000_000_000)
     parser.add_argument('--device',default='cuda');parser.add_argument('--precision',choices=DTYPES,default='fp16')
     parser.add_argument('--sequence-length',type=int,default=128);parser.add_argument('--batch-size',type=int,default=4)
@@ -261,14 +325,15 @@ def main():
     parser.add_argument('--export-every',type=int,default=1000)
     args=parser.parse_args();torch.set_num_threads(args.threads)
     cfg=DeltaConfig.from_file(args.config)
-    experimental=experimental_options(cfg,args.engine,args.cache_bytes,args.stash_budget_bytes)
+    experimental=experimental_options(cfg,args.engine,args.cache_bytes,args.stash_budget_bytes,args.chunk_microbatches,args.journal_format)
     if args.experiment_run_dir and not experimental:parser.error('--experiment-run-dir requires experimental options')
     if args.experiment_run_dir and args.run_dir:parser.error('choose --run-dir or --experiment-run-dir')
     run_dir=args.experiment_run_dir or args.run_dir or ('runs/morph-delta5b-experimental' if experimental else PRODUCTION_RUN)
     options=dict(config=args.config,run_dir=run_dir,source_config=args.source_config,device=args.device,
                  precision=args.precision,length=args.sequence_length,batch_size=args.batch_size,accumulation=args.accumulation,
                  backend=args.backend,export=not args.no_export,engine=args.engine,
-                 cache_bytes=args.cache_bytes,stash_budget_bytes=args.stash_budget_bytes)
+                 cache_bytes=args.cache_bytes,stash_budget_bytes=args.stash_budget_bytes,
+                 chunk_microbatches=args.chunk_microbatches,journal_format=args.journal_format)
     if args.preflight:
         result=preflight(**options);print(json.dumps(result,indent=2));return 0 if result['ready'] else 2
     result=run_delta_cycle(**options,target_tokens=args.target_tokens,lr=args.lr,max_steps=args.max_steps,

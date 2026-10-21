@@ -50,7 +50,7 @@ class GraphSessionMemory(nn.Module):
         super().__init__()
         from .fast_memory import GraphMemory
         from .proof_head import StatementEncoder
-        self.memory=GraphMemory(cfg.d_model,cfg.memory_dim)
+        self.memory=GraphMemory(cfg.d_model,cfg.memory_dim,cfg.memory_projection_backend)
         # Separate node embeddings avoid additional tied-LM parameter uses in
         # intermediate streaming stages. All fields remain explicitly ordered.
         self.tokens=nn.Embedding(cfg.vocab_size,cfg.d_model)
@@ -171,6 +171,51 @@ class ExpertStage(nn.Module):
         return result.reshape_as(x),aux
 
 
+class GroupedExpertStage(nn.Module):
+    """Pack only routed experts into padded BMMs; logical parameter names stay stable.
+
+    Padding is bounded by group_size * total_tokens. Stacked weights are transient
+    autograd tensors, so capacity planning must include one selected group copy.
+    """
+    stage_kind='delta_expert_group'
+    def __init__(self,experts,indices):
+        super().__init__();self.experts=nn.ModuleList(experts);self.expert_indices=tuple(indices)
+    def active_for(self,x,aux):
+        return aux is not None and any(bool((aux.argmax(-1)==index).any()) for index in self.expert_indices)
+    def parameter_names_for(self,states):
+        active=set()
+        for _,aux in states:
+            if aux is not None:active.update(aux.argmax(-1).unique().tolist())
+        return {name for name,_ in self.named_parameters() if self.expert_indices[int(name.split('.')[1])] in active}
+    @staticmethod
+    def _linear(x,modules):
+        return torch.bmm(x,torch.stack([module.weight for module in modules]).transpose(1,2))
+    @staticmethod
+    def _norm(x,modules):
+        work=x.float() if x.dtype in (torch.float16,torch.bfloat16) else x
+        return (work*torch.rsqrt(work.square().mean(-1,keepdim=True)+modules[0].eps)).to(x.dtype)*torch.stack([module.weight for module in modules])[:,None]
+    def forward(self,x,aux=None,proof_graph=None):
+        if aux is None:raise ValueError('expert stage requires differentiable routing gates')
+        routes=aux.argmax(-1).flatten();flat=x.reshape(-1,x.shape[-1])
+        selected=[(expert,index,(routes==index).nonzero().flatten()) for expert,index in zip(self.experts,self.expert_indices)]
+        selected=[item for item in selected if item[2].numel()]
+        if not selected:return x,aux
+        experts=[item[0] for item in selected];capacity=max(item[2].numel() for item in selected)
+        hidden=torch.stack([F.pad(flat.index_select(0,indices),(0,0,0,capacity-indices.numel())) for _,_,indices in selected])
+        hidden=self._norm(hidden,[expert.input_norm for expert in experts])
+        if isinstance(experts[0].down,nn.Linear):hidden=self._linear(hidden,[expert.down for expert in experts])
+        for depth in range(len(experts[0].layers)):
+            layers=[expert.layers[depth] for expert in experts]
+            normed=self._norm(hidden,[layer['norm'] for layer in layers]);ffns=[layer['ffn'] for layer in layers]
+            activated=F.silu(self._linear(normed,[ffn.gate for ffn in ffns]))*self._linear(normed,[ffn.up for ffn in ffns])
+            hidden=hidden+self._linear(activated,[ffn.down for ffn in ffns])
+        if isinstance(experts[0].up,nn.Linear):hidden=self._linear(hidden,[expert.up for expert in experts])
+        indices=torch.cat([item[2] for item in selected])
+        delta=torch.cat([hidden[row,:positions.numel()]*aux[...,index].reshape(-1).index_select(0,positions)[:,None].to(hidden.dtype)
+                         for row,(_,index,positions) in enumerate(selected)])
+        return flat.index_add(0,indices,delta).reshape_as(x),aux
+
+
 class HeadStage(nn.Module):
     stage_kind='delta_head'
     def __init__(self,model):
@@ -246,7 +291,13 @@ class DeltaModel(nn.Module):
     def stream_stages(self):
         stages=[EmbeddingStage(self.embedding),*[SharedStage(block) for block in self.blocks]]
         if self.session_memory is not None:stages.append(MemoryStage(self.session_memory))
-        stages.append(RouterStage(self.router));stages.extend(ExpertStage(expert,index) for index,expert in enumerate(self.experts))
+        stages.append(RouterStage(self.router))
+        if self.config.expert_group_size == 1:
+            stages.extend(ExpertStage(expert,index) for index,expert in enumerate(self.experts))
+        else:
+            size=self.config.expert_group_size
+            stages.extend(GroupedExpertStage(self.experts[start:start+size],range(start,min(start+size,len(self.experts))))
+                          for start in range(0,len(self.experts),size))
         stages.append(HeadStage(self));return stages
     def forward(self,input_ids,proof_graph=None,memory_state=None):
         x,aux=input_ids,None;next_memory=None

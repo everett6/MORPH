@@ -1,0 +1,22 @@
+{
+  "model_type": "delta",
+  "vocab_size": 256,
+  "d_model": 1536,
+  "num_layers": 10,
+  "d_ff": 3072,
+  "d_state": 64,
+  "head_dim": 64,
+  "ssm_backend": "triton",
+  "proof_enabled": true,
+  "fast_memory_enabled": true,
+  "expert_count": 64,
+  "expert_depth": 8,
+  "expert_ffn": 3840,
+  "latent_dim": 768,
+  "latent_experts": true,
+  "top_k": 1,
+  "step_expert_count": 8,
+  "routing_seed": 42,
+  "memory_projection_backend": "batched",
+  "expert_group_size": 1
+}

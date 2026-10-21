@@ -1,0 +1,298 @@
+{
+  "parameters": 81910,
+  "seed": 4201,
+  "source": {
+    "kind": "revision-pinned Hugging Face rows",
+    "real_qualification": true,
+    "revision": "fde8ef8de2300f5e778f56261843dab89f230815",
+    "source_fingerprint": "6d00c6e3f7a2d23dfb4249bdde3e3fa720b9c772ec63fb947e7053387890f889",
+    "train_start_row": 0,
+    "train_end_row_exclusive": 1,
+    "heldout_start_row": 1000000,
+    "heldout_end_row_exclusive": 1000001,
+    "row_disjoint": true
+  },
+  "device": "cuda",
+  "torch_version": "2.14.0+cu130",
+  "train_payload_sha256": "97d138181ae775641f4291828227cf8cac9b0e46a81178316d97e91a8f4579e7",
+  "git_head": "4620463a7ed6d871969cf72db88b27b451a575e4",
+  "tracked_diff_sha256": "5280755a506671fd693f963a695ce7e2f88fe5199a7148b4cf6fe0e0c6e0214b",
+  "source_file_sha256": {
+    "streamtrain/__init__.py": "63572f8a1ebed3b056a17f7ef473487132ea8e171e2775c01383c7f1cae6562a",
+    "streamtrain/single_pass.py": "91bc4d1e19a8b6a91b77d6b441abdefd0fd81002cd246047052b081b71c6e0e7",
+    "streamtrain/proof_inference.py": "349529944bd9127064d0d2a22a45ee948ae10c6aa97831a7b92cc2e1164681be",
+    "streamtrain/prefetch.py": "628de3773ac6db43d508e82c6df00b85029c59c2e8c2051f977162f331d8dea0",
+    "streamtrain/engine.py": "d71b0a0417bce9439705f95a0d8f1f8c46018342482c66960968661b3e3c8ea3",
+    "streamtrain/cycle.py": "839e7e26a671a9656a4d6bd232ea2b1748e84b2ca20d56faf3976ba9b901a968",
+    "streamtrain/state_cache.py": "c47629184a5bfe16b21edc2c183e63b0967b6ad870b8f626dc2f68ef9e4f3a15",
+    "streamtrain/packed_state.py": "58f23f3ced120dce1c6494679ae000ab6e87c36d6b0de53845de6161fb2204db",
+    "streamtrain/sparse_disk.py": "60c6e02cfdb879a8dc5c21bb84199b5b20b3296ceb228650c4fa68411c423ef0",
+    "streamtrain/optimizer.py": "d8be228773be0612bf9ef0ed0e02aa8648f03ff7a29dd59547964a0be95fa53c",
+    "streamtrain/export.py": "ab1fa572f4534c476a29d5c2b03cb70d42666f04a712a5fdf7f8c2a617364a16",
+    "streamtrain/delta_proof.py": "8fcdd628c8b811bdccc3d612adc7a983bbef3bc5381e90e907a0b3778e5345e0",
+    "streamtrain/delta_cycle.py": "7b9382a721fd6db0d400a95954fe37e8e8dfc3ca77589f037f79d6244b8bd3f6",
+    "streamtrain/precision.py": "3a8bf2a4a68075e5e55f8b6e8456eecd6db76bba9c6e06ad6e32123815773b04",
+    "streamtrain/disk.py": "1b112f25953730b2ee3bbf62db797a445a38916573fd19dd5b2d055c763cf0f8",
+    "morph/model/proof_head.py": "5ce48ff33842ee2eb8c055db2ca305dcc5521adf294eabdf9ccf77f37c1b59fd",
+    "morph/model/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "morph/model/triton_scan.py": "2a7cff8bc150771d3d6f028f1258ca615af80f26ccc5c65a25aaa1f724673309",
+    "morph/model/ssm.py": "e0e3da15e712cbc3c28e1556f503fa7ef7e325fd83263587578d0041a587f56e",
+    "morph/model/graph.py": "21365515bdf30ff86c6d6733e49575e51897d22097b601f6195990e920a14532",
+    "morph/model/morph_model.py": "595a502d6a025b47a2500e9a2888cb09f784174aff245d04e2dfb2653c6be977",
+    "morph/model/fast_memory.py": "88ef9d2b39846190211fb7a47d5db2992ade501829c935ec81e1fb2ab97f0417",
+    "morph/model/reasoning_core.py": "807d6ecc3aa8fbb8569c4e35715a13e8061fa6145c957fd0d62c566a1d3acd97",
+    "morph/model/delta.py": "f1ee5ec5adc18879d1ec43da428707d5eac53fa2e44a5409ea44c2b99b703512"
+  },
+  "learning_rate": 0.001,
+  "max_norm": 1.0,
+  "steps": 3,
+  "batch_size": 4,
+  "length": 128,
+  "accumulation": 4,
+  "chunk_microbatches": 2,
+  "roster": "All four experts eligible, identical routing step, seed, inputs and initial FP32 canonical tensors.",
+  "update_error_definition": "sqrt(sum((W_reference-W_optimized)^2)/sum((W_reference-W_initial)^2)), over all canonical parameters after each committed step.",
+  "threshold": {
+    "relative_loss_drift": 0.02,
+    "relative_global_norm_drift": 0.1,
+    "update_relative_l2": 0.1
+  },
+  "reference": [
+    {
+      "loss": 5.5452423095703125,
+      "grad_norm": 0.8499933758728982
+    },
+    {
+      "loss": 5.518178701400757,
+      "grad_norm": 1.057165232475784
+    },
+    {
+      "loss": 5.47479784488678,
+      "grad_norm": 1.0369701686403652
+    }
+  ],
+  "variants": [
+    {
+      "expert_group_size": 1,
+      "memory_projection_backend": "batched",
+      "steps": [
+        {
+          "step": 1,
+          "reference": {
+            "loss": 5.5452423095703125,
+            "grad_norm": 0.8499933758728982
+          },
+          "optimized": {
+            "loss": 5.5452423095703125,
+            "grad_norm": 0.8499953011614294
+          },
+          "statistics": {
+            "update_relative_l2": 0.018311503846756536,
+            "reference_update_l2": 0.24988292161661962,
+            "max_absolute_weight_difference": 0.001237957738339901,
+            "first_moment_relative_l2": 0.00012222497274925253,
+            "first_moment_max_absolute_difference": 2.2887252271175385e-06,
+            "second_moment_relative_l2": 0.00018866280141242254,
+            "second_moment_max_absolute_difference": 6.51925802230835e-09,
+            "finite": true
+          },
+          "parameter_clocks_equal": true,
+          "gate": {
+            "relative_loss_drift": 0.0,
+            "relative_global_norm_drift": 2.2650629826143923e-06,
+            "update_relative_l2": 0.018311503846756536,
+            "finite": true,
+            "limits": {
+              "relative_loss": 0.02,
+              "relative_global_norm": 0.1,
+              "update_relative_l2": 0.1
+            },
+            "passed": true
+          }
+        },
+        {
+          "step": 2,
+          "reference": {
+            "loss": 5.518178701400757,
+            "grad_norm": 1.057165232475784
+          },
+          "optimized": {
+            "loss": 5.518178939819336,
+            "grad_norm": 1.057148970897117
+          },
+          "statistics": {
+            "update_relative_l2": 0.011602828773707849,
+            "reference_update_l2": 0.4416949845896127,
+            "max_absolute_weight_difference": 0.0013884827494621277,
+            "first_moment_relative_l2": 0.00010452764188090094,
+            "first_moment_max_absolute_difference": 4.3031759560108185e-06,
+            "second_moment_relative_l2": 0.00011143130043961603,
+            "second_moment_max_absolute_difference": 7.608832675032318e-09,
+            "finite": true
+          },
+          "parameter_clocks_equal": true,
+          "gate": {
+            "relative_loss_drift": 4.320602720623045e-08,
+            "relative_global_norm_drift": 1.5382248836451054e-05,
+            "update_relative_l2": 0.011602828773707849,
+            "finite": true,
+            "limits": {
+              "relative_loss": 0.02,
+              "relative_global_norm": 0.1,
+              "update_relative_l2": 0.1
+            },
+            "passed": true
+          }
+        },
+        {
+          "step": 3,
+          "reference": {
+            "loss": 5.47479784488678,
+            "grad_norm": 1.0369701686403652
+          },
+          "optimized": {
+            "loss": 5.4747984409332275,
+            "grad_norm": 1.0369627228251928
+          },
+          "statistics": {
+            "update_relative_l2": 0.008927116682276331,
+            "reference_update_l2": 0.6280976290272465,
+            "max_absolute_weight_difference": 0.0015128478407859802,
+            "first_moment_relative_l2": 0.0001028332462165825,
+            "first_moment_max_absolute_difference": 4.5532360672950745e-06,
+            "second_moment_relative_l2": 0.00012209589306799392,
+            "second_moment_max_absolute_difference": 1.3154931366443634e-08,
+            "finite": true
+          },
+          "parameter_clocks_equal": true,
+          "gate": {
+            "relative_loss_drift": 1.0887095097229706e-07,
+            "relative_global_norm_drift": 7.180356193068733e-06,
+            "update_relative_l2": 0.008927116682276331,
+            "finite": true,
+            "limits": {
+              "relative_loss": 0.02,
+              "relative_global_norm": 0.1,
+              "update_relative_l2": 0.1
+            },
+            "passed": true
+          }
+        }
+      ],
+      "passed": true
+    },
+    {
+      "expert_group_size": 2,
+      "memory_projection_backend": "batched",
+      "steps": [
+        {
+          "step": 1,
+          "reference": {
+            "loss": 5.5452423095703125,
+            "grad_norm": 0.8499933758728982
+          },
+          "optimized": {
+            "loss": 5.5452423095703125,
+            "grad_norm": 0.849995301161442
+          },
+          "statistics": {
+            "update_relative_l2": 0.018311503846870227,
+            "reference_update_l2": 0.24988292161661962,
+            "max_absolute_weight_difference": 0.001237957738339901,
+            "first_moment_relative_l2": 0.0001222249727750371,
+            "first_moment_max_absolute_difference": 2.2887252271175385e-06,
+            "second_moment_relative_l2": 0.00018866280141242254,
+            "second_moment_max_absolute_difference": 6.51925802230835e-09,
+            "finite": true
+          },
+          "parameter_clocks_equal": true,
+          "gate": {
+            "relative_loss_drift": 0.0,
+            "relative_global_norm_drift": 2.265062997373943e-06,
+            "update_relative_l2": 0.018311503846870227,
+            "finite": true,
+            "limits": {
+              "relative_loss": 0.02,
+              "relative_global_norm": 0.1,
+              "update_relative_l2": 0.1
+            },
+            "passed": true
+          }
+        },
+        {
+          "step": 2,
+          "reference": {
+            "loss": 5.518178701400757,
+            "grad_norm": 1.057165232475784
+          },
+          "optimized": {
+            "loss": 5.518178939819336,
+            "grad_norm": 1.0571489709781148
+          },
+          "statistics": {
+            "update_relative_l2": 0.011602828780770163,
+            "reference_update_l2": 0.4416949845896127,
+            "max_absolute_weight_difference": 0.0013884827494621277,
+            "first_moment_relative_l2": 0.0001045275924764131,
+            "first_moment_max_absolute_difference": 4.3031759560108185e-06,
+            "second_moment_relative_l2": 0.00011143130044905643,
+            "second_moment_max_absolute_difference": 7.608832675032318e-09,
+            "finite": true
+          },
+          "parameter_clocks_equal": true,
+          "gate": {
+            "relative_loss_drift": 4.320602720623045e-08,
+            "relative_global_norm_drift": 1.5382172218461185e-05,
+            "update_relative_l2": 0.011602828780770163,
+            "finite": true,
+            "limits": {
+              "relative_loss": 0.02,
+              "relative_global_norm": 0.1,
+              "update_relative_l2": 0.1
+            },
+            "passed": true
+          }
+        },
+        {
+          "step": 3,
+          "reference": {
+            "loss": 5.47479784488678,
+            "grad_norm": 1.0369701686403652
+          },
+          "optimized": {
+            "loss": 5.4747984409332275,
+            "grad_norm": 1.036962722882237
+          },
+          "statistics": {
+            "update_relative_l2": 0.008927117283016555,
+            "reference_update_l2": 0.6280976290272465,
+            "max_absolute_weight_difference": 0.0015128478407859802,
+            "first_moment_relative_l2": 0.00010283327980231822,
+            "first_moment_max_absolute_difference": 4.5532360672950745e-06,
+            "second_moment_relative_l2": 0.0001220958930821535,
+            "second_moment_max_absolute_difference": 1.3154931366443634e-08,
+            "finite": true
+          },
+          "parameter_clocks_equal": true,
+          "gate": {
+            "relative_loss_drift": 1.0887095097229706e-07,
+            "relative_global_norm_drift": 7.180301182665437e-06,
+            "update_relative_l2": 0.008927117283016555,
+            "finite": true,
+            "limits": {
+              "relative_loss": 0.02,
+              "relative_global_norm": 0.1,
+              "update_relative_l2": 0.1
+            },
+            "passed": true
+          }
+        }
+      ],
+      "passed": true
+    }
+  ],
+  "scope": "Three-step small-model numerical accuracy gate only; no convergence, full5B, or throughput inference.",
+  "passed": true,
+  "run_started_utc": "2026-10-21T22:17:35.370384+00:00",
+  "run_completed_utc": "2026-10-21T22:17:55.210154+00:00"
+}

@@ -22,7 +22,13 @@ def export_fp16(state_dir,output,chunk_elements=1048576,lock_held=False):
         manifest=json.loads((state_dir/'manifest.json').read_text())
         if manifest['dirty']:raise ValueError('cannot export an incomplete optimizer transaction')
         with torch.device('meta'):model=model_from_config(config_from_dict(manifest['config']))
-        store=DiskState.open(state_dir,model)
+        journal_format=manifest.get('journal_format','legacy')
+        if journal_format=='legacy':state_class=DiskState
+        elif journal_format=='packed-v1':
+            from .packed_state import PackedDiskState
+            state_class=PackedDiskState
+        else:raise ValueError('unsupported disk journal format')
+        store=state_class.open(state_dir,model)
         output.mkdir(parents=True,exist_ok=False);weights={}
         for name,entry in store.entries.items():
             source=np.memmap(state_dir/entry['file'],dtype=np.float32,mode='r',shape=(3,entry['size']))

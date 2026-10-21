@@ -22,7 +22,9 @@ class SparseDiskDLS(DiskDLS):
         predicate=getattr(self.stages[index],'active_for',None)
         active=predicate is None or any(predicate(*state) for state in states)
         self.active_stages[index]=active
-        self.specs[index]=self.all_specs[index] if active else []
+        selector=getattr(self.stages[index],'parameter_names_for',None)
+        selected=selector(states) if active and selector is not None else None
+        self.specs[index]=[item for item in self.all_specs[index] if selected is None or item[0] in selected] if active else []
         return active
 
     def boundaries(self,batches):
@@ -47,11 +49,17 @@ class SparseDiskDLS(DiskDLS):
             parameters=self.parameters(index,slot,False)
             for micro,state in enumerate(states):
                 self.report('forward',index,micro)
+                prep_started=time.perf_counter()
                 device_state=tuple(v.to(self.device) if v is not None else None for v in state)
                 graph=None if graphs[micro] is None else {k:v.to(self.device) for k,v in graphs[micro].items()}
+                self.timing('forward_preparation_wall',time.perf_counter()-prep_started)
+                marker=self.compute_start()
                 with torch.no_grad(),torch.autocast(self.device.type,dtype=self.dtype,enabled=self.dtype in (torch.float16,torch.bfloat16)):
                     result=functional_call(self.stages[index],parameters,(*device_state,graph))
+                self.compute_end('forward',marker,expert=hasattr(self.stages[index],'expert_index') or hasattr(self.stages[index],'expert_indices'))
+                copy_started=time.perf_counter()
                 states[micro]=tuple(v.detach().cpu() if v is not None else None for v in result)
+                self.timing('forward_boundary_d2h_wall',time.perf_counter()-copy_started)
             self.release(slot)
         for micro,state in enumerate(states):saved[micro].append(state)
         return saved
@@ -70,7 +78,6 @@ class SparseDiskDLS(DiskDLS):
             self.report('update_reverse' if update else 'norm_reverse',index)
             if not self.active_stages[index]:
                 if update:
-                    self.store.prepare_stage(index,[])
                     self.store.commit_stage(index,cotangents,tied)
                 continue
             slot=self.slots[index%2]
@@ -87,11 +94,14 @@ class SparseDiskDLS(DiskDLS):
             else:accumulated=[torch.zeros(p.shape) for _,p in self.specs[index]]
             seen=[False]*len(accumulated)
             for micro,batch in enumerate(batches):
+                prep_started=time.perf_counter()
                 _,graph=unpack_batch(batch,self.device)
                 params=self.parameters(index,slot,True)
                 state=tuple(v.to(self.device).detach().requires_grad_(bool(index)) if v is not None else None for v in checkpoints[micro][index])
                 state_values=[v for v in state if v is not None] if index else []
                 weights=[params[name] for name,_ in self.specs[index]]
+                self.timing('reverse_preparation_wall',time.perf_counter()-prep_started)
+                marker=self.compute_start()
                 with torch.enable_grad(),torch.autocast(self.device.type,dtype=self.dtype,enabled=self.dtype in (torch.float16,torch.bfloat16)):
                     output=functional_call(self.stages[index],params,(*state,graph))
                     if cotangents[micro] is None:
@@ -100,6 +110,8 @@ class SparseDiskDLS(DiskDLS):
                         grads=torch.autograd.grad(loss*self.loss_scale/len(batches),state_values+weights,allow_unused=True)
                     else:
                         grads=torch.autograd.grad([v for v in output if v is not None],state_values+weights,cotangents[micro],allow_unused=True)
+                self.compute_end('update_reverse' if update else 'norm_reverse',marker,expert=hasattr(self.stages[index],'expert_index') or hasattr(self.stages[index],'expert_indices'))
+                copy_started=time.perf_counter()
                 cotangents[micro]=[torch.zeros_like(v) if g is None else g for v,g in zip(state_values,grads)] if index else None
                 for j,(destination,g) in enumerate(zip(accumulated,grads[len(state_values):])):
                     if g is not None:
@@ -107,21 +119,28 @@ class SparseDiskDLS(DiskDLS):
                         value=g.detach().float()/self.loss_scale
                         destination.add_(value if self.device.type=='cuda' else value.cpu())
                         if self.device.type!='cuda':self.transfer_bytes['d2h_gradients']+=g.numel()*4
+                self.timing('gradient_accumulation_wall',time.perf_counter()-copy_started)
                 del params,output,weights,grads,state_values
             if self.device.type=='cuda':
+                copy_started=time.perf_counter()
                 if self.async_mode:
                     self.release(slot)
                     with torch.cuda.stream(self.d2h):
+                        transfer_start=torch.cuda.Event(enable_timing=True);transfer_start.record(self.d2h)
                         self.d2h.wait_event(slot.done)
                         slot.grad_host[:total].copy_(flat_gradient,non_blocking=True)
+                        transfer_end=torch.cuda.Event(enable_timing=True);transfer_end.record(self.d2h)
+                        self.compute_events.append(('d2h_transfer',transfer_start,transfer_end))
                         copied=torch.cuda.Event();copied.record(self.d2h)
-                    copied.synchronize()
+                    wait_started=time.perf_counter();copied.synchronize()
+                    self.timing('gradient_d2h_wait_wall',time.perf_counter()-wait_started)
                 else:slot.grad_host[:total].copy_(flat_gradient)
                 accumulated=[v.view_as(p) for v,(_,p) in zip(slot.grad_host[:total].split(sizes),self.specs[index])]
                 self.transfer_bytes['d2h_gradients']+=total*4
+                self.timing('gradient_d2h_wall',time.perf_counter()-copy_started)
             selected=[(self.canonical[id(p)],g) for ((_,p),g,used) in zip(self.specs[index],accumulated,seen) if used]
             names=[name for name,_ in selected if index==0 or name!=embedding_name]
-            if update:self.store.prepare_stage(index,names)
+            if update and names:self.store.prepare_stage(index,names)
             next_clocks={}
             for name,gradient in selected:
                 if name==embedding_name and index!=0:

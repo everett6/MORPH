@@ -29,10 +29,13 @@ class FastMemoryState:
 
 
 class GraphMemory(nn.Module):
-    def __init__(self, dim, memory_dim=32):
+    def __init__(self, dim, memory_dim=32, projection_backend="reference"):
         super().__init__()
         if dim <= 0 or memory_dim <= 0:
             raise ValueError('memory dimensions must be positive')
+        if projection_backend not in ("reference", "batched"):
+            raise ValueError("unsupported memory projection backend")
+        self.projection_backend = projection_backend
         self.dim, self.memory_dim = dim, memory_dim
         self.key = nn.Linear(dim, memory_dim)
         self.value = nn.Linear(dim, memory_dim)
@@ -54,20 +57,35 @@ class GraphMemory(nn.Module):
             raise ValueError('memory state has incompatible shape, device or precision')
         matrix = state.matrix
         outputs = []
+        projected = None
+        if self.projection_backend == 'batched' and length:
+            tokens = hidden
+            if graph_context is not None:
+                tokens = tokens + self.graph_projection(graph_context.to(hidden.dtype))[:, None]
+            # Preserve the reference gate linear's storage dtype and disabled
+            # autocast context (FP16 slots compute FP16 gates before conversion).
+            with torch.autocast(device_type=hidden.device.type, enabled=False):
+                gates_all = torch.sigmoid(self.gates(tokens).float())
+            projected = (tokens, F.normalize(self.key(tokens).float(), dim=-1, eps=1e-6),
+                         self.value(tokens).float(), F.normalize(self.query(tokens).float(), dim=-1, eps=1e-6), gates_all)
         # Outer training differentiates through every update. State is functional:
         # passing a branch never mutates its parent or the caller's checkpoint.
         for index in range(length):
-            token = hidden[:, index]
-            if graph_context is not None:
-                token = token + self.graph_projection(graph_context.to(token.dtype))
-            key = F.normalize(self.key(token).float(), dim=-1, eps=1e-6)
-            value = self.value(token).float()
-            query = F.normalize(self.query(token).float(), dim=-1, eps=1e-6)
+            if projected is None:
+                token = hidden[:, index]
+                if graph_context is not None:
+                    token = token + self.graph_projection(graph_context.to(token.dtype))
+                key = F.normalize(self.key(token).float(), dim=-1, eps=1e-6)
+                value = self.value(token).float()
+                query = F.normalize(self.query(token).float(), dim=-1, eps=1e-6)
+            else:
+                token, key, value, query, _ = (tensor[:, index] for tensor in projected)
             # Disable autocast for state operations even under FP16 model training.
             with torch.autocast(device_type=hidden.device.type, enabled=False):
                 retrieved = torch.bmm(matrix, query.unsqueeze(-1)).squeeze(-1)
                 error = value - torch.bmm(matrix, key.unsqueeze(-1)).squeeze(-1)
-                gates = torch.sigmoid(self.gates(token).float())
+                gates = (torch.sigmoid(self.gates(token).float())
+                         if projected is None else projected[4][:, index])
                 eta, decay = gates[:, :1], gates[:, 1:] * 0.1
                 correction = error.unsqueeze(-1) * key.unsqueeze(-2)
                 correction = correction / (key.square().sum(-1)[:, None, None] + 1e-6)

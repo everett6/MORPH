@@ -2,6 +2,11 @@
 
 ## Native sparse MORPH-Delta
 
+The [isolated training-speed audit](docs/training_audit_implementation.md) adds optional
+packed recovery journals, bounded accumulation, grouped experts, and batched session-memory
+projections. Its small real-data measurements and FP16 precision gates are documented;
+full 5B throughput and seven-day completion remain unqualified.
+
 The new [Delta training guide](docs/delta_training_ready.md) covers the
 **4,981,264,481-parameter** sparse SSM/proof model, differentiable session memory,
 versioned graph caches, conditional FP32 AdamW, CPU/CUDA ping-pong prefetch, and

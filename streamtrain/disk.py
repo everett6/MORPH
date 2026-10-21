@@ -10,6 +10,7 @@ import os
 import shutil
 import time
 from contextlib import nullcontext
+from contextvars import ContextVar
 from pathlib import Path
 import numpy as np
 import torch
@@ -18,16 +19,28 @@ from torch.nn import functional as F
 from .engine import StreamTrainEngine,make_stages,unpack_batch,stage_loss
 
 
+_profile_store=ContextVar('disk_profile_store',default=None)
+
+def profile_fsync(descriptor):
+    started=time.perf_counter()
+    try:os.fsync(descriptor)
+    finally:
+        store=_profile_store.get()
+        if store is not None:
+            store.profile_seconds['fsync_wall']=store.profile_seconds.get('fsync_wall',0.)+time.perf_counter()-started
+            store.profile_counts['fsync']=store.profile_counts.get('fsync',0)+1
+
+
 def durable_json(path, data):
     temp = path.with_suffix('.tmp')
     with temp.open('w') as handle:
         json.dump(data, handle)
         handle.flush()
-        os.fsync(handle.fileno())
+        profile_fsync(handle.fileno())
     os.replace(temp, path)
     descriptor = os.open(path.parent, os.O_RDONLY)
     try:
-        os.fsync(descriptor)
+        profile_fsync(descriptor)
     finally:
         os.close(descriptor)
 
@@ -35,20 +48,43 @@ def durable_json(path, data):
 def durable_torch(path, value):
     temp=path.with_suffix('.tmp')
     with temp.open('wb') as handle:
-        torch.save(value,handle);handle.flush();os.fsync(handle.fileno())
+        torch.save(value,handle);handle.flush();profile_fsync(handle.fileno())
     os.replace(temp,path)
     descriptor=os.open(path.parent,os.O_RDONLY)
-    try:os.fsync(descriptor)
+    try:profile_fsync(descriptor)
     finally:os.close(descriptor)
 
 
 class DiskState:
     def __init__(self, root, model, manifest):
         self.root, self.manifest = Path(root), manifest
+        self.profile_seconds={};self.profile_counts={};self.profile_bytes={}
+        # Wrap virtual methods so packed/cache overrides are measured too.
+        for operation in ('read_into','prepare_stage','update','commit_stage','recover_stage'):
+            method=getattr(self,operation)
+            def measured(*args,_method=method,_operation=operation,**kwargs):
+                started=time.perf_counter();token=_profile_store.set(self)
+                try:return _method(*args,**kwargs)
+                finally:
+                    _profile_store.reset(token)
+                    self.profile_seconds[_operation+'_wall']=self.profile_seconds.get(_operation+'_wall',0.)+time.perf_counter()-started
+                    self.profile_counts[_operation]=self.profile_counts.get(_operation,0)+1
+                    byte_count=0
+                    if _operation=='read_into':byte_count=self.entries[args[0]]['size']*4
+                    elif _operation=='update':byte_count=self.entries[args[0]]['size']*12
+                    elif _operation=='prepare_stage':byte_count=sum(self.entries[n]['size']*12 for n in args[1])
+                    self.profile_bytes[_operation]=self.profile_bytes.get(_operation,0)+byte_count
+            setattr(self,operation,measured)
         self.entries = {name: dict(shape=list(p.shape), size=p.numel(), file=f'{i:05}.bin')
                         for i, (name, p) in enumerate(model.named_parameters())}
         if self.entries != manifest['entries']:
             raise ValueError('disk state tensor schema differs')
+
+    def profile_snapshot(self):
+        """Flat cumulative counters. Fsync overlaps enclosing operation wall time."""
+        return {**self.profile_seconds,
+                **{name+'_count':value for name,value in self.profile_counts.items()},
+                **{name+'_bytes':value for name,value in self.profile_bytes.items()}}
 
     @classmethod
     def create(cls, root, model, source=None, seed=42, chunk_elements=1048576, progress=None):
@@ -92,6 +128,8 @@ class DiskState:
     def open(cls, root, model):
         root = Path(root)
         manifest = json.loads((root / 'manifest.json').read_text())
+        if manifest.get('journal_format','legacy') != getattr(cls,'journal_format','legacy'):
+            raise ValueError('disk journal format differs; use matching state class')
         if manifest['dirty'] and not manifest.get('transaction'):
             raise RuntimeError('incomplete disk update: state is not a valid resume point; restore a backup')
         if type(model.config)(**manifest['config']).to_dict() != model.config.to_dict():
@@ -118,7 +156,7 @@ class DiskState:
             for path in journal.glob('*.bin'):
                 shutil.copyfile(path,self.root/path.name)
                 descriptor=os.open(self.root/path.name,os.O_RDWR)
-                try:os.fsync(descriptor)
+                try:profile_fsync(descriptor)
                 finally:os.close(descriptor)
             transaction['journal']=None
             durable_json(self.root/'manifest.json',self.manifest)
@@ -135,10 +173,10 @@ class DiskState:
             file=self.entries[name]['file']
             shutil.copyfile(self.root/file,journal/file)
             descriptor=os.open(journal/file,os.O_RDWR)
-            try:os.fsync(descriptor)
+            try:profile_fsync(descriptor)
             finally:os.close(descriptor)
         descriptor=os.open(journal,os.O_RDONLY)
-        try:os.fsync(descriptor)
+        try:profile_fsync(descriptor)
         finally:os.close(descriptor)
         self.fault('journal_durable')
         self.manifest['transaction']['journal']=index
@@ -218,7 +256,7 @@ class DiskState:
         del mapped
         descriptor = os.open(path, os.O_RDWR)
         try:
-            os.fsync(descriptor)
+            profile_fsync(descriptor)
         finally:
             os.close(descriptor)
 
@@ -248,6 +286,17 @@ class DiskDLS(StreamTrainEngine):
         self.async_mode = async_mode
         self.phase_seconds={}
         self.compute_events=[]
+        for operation in ('step','resume_step'):
+            method=getattr(self,operation)
+            def measured_step(*args,_method=method,_operation=operation,**kwargs):
+                token=_profile_store.set(self.store)
+                wall_started=time.perf_counter();cpu_started=time.process_time()
+                try:return _method(*args,**kwargs)
+                finally:
+                    self.timing(_operation+'_wall',time.perf_counter()-wall_started)
+                    self.timing(_operation+'_cpu_process',time.process_time()-cpu_started)
+                    _profile_store.reset(token)
+            setattr(self,operation,measured_step)
         self.fp8_transfer=fp8_transfer
         self.cpu_prefetch=cpu_prefetch
         from .prefetch import SlotPrefetch
@@ -274,6 +323,32 @@ class DiskDLS(StreamTrainEngine):
                     module.sources = torch.arange(capacity).view(1, -1, 1)
                     module.targets = torch.arange(capacity).roll(-1).view(1, -1)
 
+    def profile_snapshot(self,previous=None):
+        """Cumulative counters or deltas; overlapping wall/stream times are not additive."""
+        self.collect_compute_timing()
+        current=dict(seconds={**self.phase_seconds,**self.store.profile_seconds},
+                     counts=dict(self.store.profile_counts),
+                     bytes={**self.store.profile_bytes,**self.transfer_bytes})
+        if previous is None:return current
+        return {group:{key:value-previous.get(group,{}).get(key,0) for key,value in values.items()}
+                for group,values in current.items()}
+
+    def compute_start(self):
+        started=time.perf_counter();event=None
+        if self.device.type=='cuda':
+            event=torch.cuda.Event(enable_timing=True);event.record(self.compute)
+        return started,event
+
+    def compute_end(self,phase,marker,expert=False):
+        started,event=marker
+        if event is not None:
+            end=torch.cuda.Event(enable_timing=True);end.record(self.compute)
+            self.compute_events.append((phase,event,end))
+            if expert:self.compute_events.append(('expert_'+phase,event,end))
+        elapsed=time.perf_counter()-started
+        self.timing(phase+'_launch_wall',elapsed)
+        if expert:self.timing('expert_'+phase+'_launch_wall',elapsed)
+
     def timing(self,name,elapsed):
         self.phase_seconds[name]=self.phase_seconds.get(name,0.)+elapsed
 
@@ -296,7 +371,9 @@ class DiskDLS(StreamTrainEngine):
             return self._load_sync(index,slot)
 
     def parameters(self,index,slot,grad):
+        started=time.perf_counter()
         if self.prefetch is not None:self.prefetch.wait(slot)
+        self.timing('prefetch_wait_wall',time.perf_counter()-started)
         return super().parameters(index,slot,grad)
 
     def close(self):
@@ -331,6 +408,9 @@ class DiskDLS(StreamTrainEngine):
         # completion event. The next load synchronizes it before reuse/deletion.
         slot.fp8_pending=[]
         with torch.cuda.stream(self.h2d) if self.async_mode else nullcontext():
+            transfer_event=None
+            if self.device.type=='cuda':
+                transfer_event=torch.cuda.Event(enable_timing=True);transfer_event.record()
             if self.async_mode and slot.done is not None:
                 self.h2d.wait_event(slot.done)
             from .precision import fp8_eligible,pack_fp8,unpack_fp8
@@ -351,6 +431,9 @@ class DiskDLS(StreamTrainEngine):
                     slot.weights[offset:offset+size].copy_(slot.host[offset:offset+size],non_blocking=self.async_mode)
                     transferred+=size*slot.weights.element_size()
                 offset+=size
+            if transfer_event is not None:
+                transfer_end=torch.cuda.Event(enable_timing=True);transfer_end.record()
+                self.compute_events.append(('h2d_transfer',transfer_event,transfer_end))
             if self.async_mode:
                 slot.loaded = torch.cuda.Event()
                 slot.loaded.record(self.h2d)
